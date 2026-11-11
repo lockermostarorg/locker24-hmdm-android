@@ -8,3 +8,5 @@
 .externalNativeBuild
 example/
 app/release
+/locker24.properties
+*.jks

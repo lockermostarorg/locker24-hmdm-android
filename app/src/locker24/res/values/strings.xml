@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="white_app_name" translatable="false">Locker24 MDM</string>
+    <string name="app_name" translatable="false">Locker24 MDM</string>
+    <string name="vendor" translatable="false">Locker24</string>
+</resources>
