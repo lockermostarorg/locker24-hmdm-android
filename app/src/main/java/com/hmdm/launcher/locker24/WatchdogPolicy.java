@@ -4,12 +4,15 @@ public final class WatchdogPolicy {
     public enum Action { NONE, RELAUNCH }
 
     private static final int LOCK_TASK_LOST_LIMIT = 2;
+    public static final int LOCK_LOST_RELAUNCH_LIMIT = 3;
 
     private final int launcherInFrontLimit;
     private int lockTaskLostCount;
     private int launcherInFrontCount;
     private boolean lastInteractiveInFront;
     private boolean screenOffRelaunched;
+    private int lockLostRelaunches;
+    private boolean lastRelaunchLockLost;
 
     public WatchdogPolicy(int launcherInFrontLimit) {
         this.launcherInFrontLimit = Math.max(1, launcherInFrontLimit);
@@ -24,6 +27,10 @@ public final class WatchdogPolicy {
         if (interactive) {
             screenOffRelaunched = false;
         }
+        if (lockTaskLocked || adminUnlocked || (interactive && !required)) {
+            lockLostRelaunches = 0;
+        }
+        lastRelaunchLockLost = false;
         Action action = evaluateCore(required, adminUnlocked, lockTaskLocked, launcherInFront, interactive);
         if (action == Action.RELAUNCH && !interactive) {
             if (screenOffRelaunched) {
@@ -31,7 +38,28 @@ public final class WatchdogPolicy {
             }
             screenOffRelaunched = true;
         }
+        if (action == Action.RELAUNCH && !lockTaskLocked) {
+            lockLostRelaunches++;
+            lastRelaunchLockLost = true;
+        }
         return action;
+    }
+
+    /**
+     * True after LOCK_LOST_RELAUNCH_LIMIT lock-lost relaunches in a row without a tick
+     * that saw lock task locked. The lock-lost path then stays quiet until a locked
+     * tick, an admin unlock or an interactive tick where kiosk is not required.
+     */
+    public boolean isLockLostBackedOff() {
+        return lockLostRelaunches >= LOCK_LOST_RELAUNCH_LIMIT;
+    }
+
+    /** The caller did not perform the RELAUNCH just returned, so it does not count toward the backoff. */
+    public void onRelaunchSkipped() {
+        if (lastRelaunchLockLost && lockLostRelaunches > 0) {
+            lockLostRelaunches--;
+        }
+        lastRelaunchLockLost = false;
     }
 
     private Action evaluateCore(boolean required, boolean adminUnlocked, boolean lockTaskLocked,
@@ -48,6 +76,10 @@ public final class WatchdogPolicy {
         }
         if (!lockTaskLocked) {
             launcherInFrontCount = 0;
+            if (isLockLostBackedOff()) {
+                lockTaskLostCount = 0;
+                return Action.NONE;
+            }
             lockTaskLostCount++;
             if (lockTaskLostCount >= LOCK_TASK_LOST_LIMIT) {
                 reset();

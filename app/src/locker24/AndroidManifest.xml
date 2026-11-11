@@ -23,6 +23,11 @@
             </intent-filter>
         </receiver>
 
+        <provider
+            android:name="com.hmdm.launcher.locker24.LauncherLifecycleProvider"
+            android:authorities="${applicationId}.locker24.lifecycle"
+            android:exported="false" />
+
         <receiver
             android:name="com.hmdm.launcher.locker24.BootWatchdogReceiver"
             android:exported="false">

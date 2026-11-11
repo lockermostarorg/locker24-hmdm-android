@@ -8,6 +8,16 @@ public class KioskState {
     private static final String KEY_ADMIN_UNLOCKED = "admin_unlocked";
     private static final String KEY_LAST_REBOOT_DATE = "last_reboot_date";
 
+    private static volatile boolean launcherResumed;
+
+    public static boolean isLauncherResumed() {
+        return launcherResumed;
+    }
+
+    static void setLauncherResumed(boolean resumed) {
+        launcherResumed = resumed;
+    }
+
     public static boolean isAdminUnlocked(Context context) {
         return prefs(context).getBoolean(KEY_ADMIN_UNLOCKED, false);
     }

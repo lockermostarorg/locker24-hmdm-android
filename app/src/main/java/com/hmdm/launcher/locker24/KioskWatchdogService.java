@@ -1,6 +1,5 @@
 package com.hmdm.launcher.locker24;
 
-import android.app.ActivityManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -16,7 +15,6 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.PowerManager;
-import android.os.Process;
 
 import com.hmdm.launcher.Const;
 import com.hmdm.launcher.helper.SettingsHelper;
@@ -29,7 +27,6 @@ import com.hmdm.launcher.util.RemoteLogger;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.List;
 
 public class KioskWatchdogService extends Service {
     public static final String ACTION_RECHECK = "com.hmdm.launcher.locker24.ACTION_RECHECK";
@@ -49,6 +46,7 @@ public class KioskWatchdogService extends Service {
     private long lastRelaunchAt;
     private boolean lastKioskAppMissing;
     private String lastCappedValue;
+    private boolean lockNeverEngagedLogged;
     private PowerManager.WakeLock wakeLock;
 
     private final Runnable tickRunnable = new Runnable() {
@@ -118,6 +116,7 @@ public class KioskWatchdogService extends Service {
     public void onCreate() {
         super.onCreate();
         policy = new WatchdogPolicy(LAUNCHER_IN_FRONT_LIMIT);
+        LauncherLifecycle.ensureRegistered(getApplication());
         thread = new HandlerThread("locker24-watchdog");
         thread.start();
         handler = new Handler(thread.getLooper());
@@ -247,6 +246,15 @@ public class KioskWatchdogService extends Service {
         boolean interactive = pm == null || pm.isInteractive();
         WatchdogPolicy.Action action = policy.evaluate(required, adminUnlocked, lockTaskLocked, launcherInFront,
                 interactive);
+        if (policy.isLockLostBackedOff()) {
+            if (!lockNeverEngagedLogged) {
+                lockNeverEngagedLogged = true;
+                safeLog(Const.LOG_ERROR, "Kiosk lock never engaged after "
+                        + WatchdogPolicy.LOCK_LOST_RELAUNCH_LIMIT + " attempts");
+            }
+        } else {
+            lockNeverEngagedLogged = false;
+        }
         if (action != WatchdogPolicy.Action.RELAUNCH) {
             return;
         }
@@ -258,6 +266,7 @@ public class KioskWatchdogService extends Service {
                         : "Kiosk watchdog resumed: kiosk app installed");
             }
             if (missing) {
+                policy.onRelaunchSkipped();
                 return;
             }
         } else if (ctx.getPackageName().equals(mainApp())) {
@@ -283,22 +292,15 @@ public class KioskWatchdogService extends Service {
         }
     }
 
+    /**
+     * True only while the launcher's MainActivity is resumed, as reported by activity
+     * lifecycle callbacks. The process importance is not used: a top app bound to one
+     * of our services also makes our process IMPORTANCE_FOREGROUND, which would make
+     * the watchdog relaunch the launcher over it every few minutes. When the callbacks
+     * are not registered the answer is false, so the in-front path cannot misfire.
+     */
     private boolean isLauncherInFront() {
-        ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
-        if (am == null) {
-            return false;
-        }
-        List<ActivityManager.RunningAppProcessInfo> procs = am.getRunningAppProcesses();
-        if (procs == null) {
-            return false;
-        }
-        int myPid = Process.myPid();
-        for (ActivityManager.RunningAppProcessInfo p : procs) {
-            if (p.pid == myPid) {
-                return p.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND;
-            }
-        }
-        return false;
+        return LauncherLifecycle.isRegistered() && KioskState.isLauncherResumed();
     }
 
     private String mainApp() {
