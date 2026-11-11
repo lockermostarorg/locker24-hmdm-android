@@ -23,11 +23,12 @@ public final class DevicePolicies {
     public static void apply(Context context) {
         try {
             Context ctx = context.getApplicationContext();
-            if (Utils.isDeviceOwner(ctx) && stayOnEnabled(ctx)) {
+            if (Utils.isDeviceOwner(ctx)) {
                 try {
                     DevicePolicyManager dpm = (DevicePolicyManager) ctx.getSystemService(Context.DEVICE_POLICY_SERVICE);
                     ComponentName admin = LegacyUtils.getAdminComponentName(ctx);
-                    dpm.setGlobalSetting(admin, Settings.Global.STAY_ON_WHILE_PLUGGED_IN, STAY_ON_ALL_POWER);
+                    dpm.setGlobalSetting(admin, Settings.Global.STAY_ON_WHILE_PLUGGED_IN,
+                            stayOnEnabled(ctx) ? STAY_ON_ALL_POWER : "0");
                 } catch (Throwable e) {
                     log(ctx, Const.LOG_WARN, "Cannot set stay-on-while-plugged: " + e);
                 }
@@ -56,7 +57,7 @@ public final class DevicePolicies {
             boolean agent = pm.isIgnoringBatteryOptimizations(ctx.getPackageName());
             ServerConfig config = SettingsHelper.getInstance(ctx).getConfig();
             String mainApp = config != null ? config.getMainApp() : null;
-            boolean kiosk = mainApp != null && pm.isIgnoringBatteryOptimizations(mainApp);
+            String kiosk = mainApp == null ? "none" : String.valueOf(pm.isIgnoringBatteryOptimizations(mainApp));
             log(ctx, Const.LOG_INFO, "battery_opt agent=" + agent + " kiosk=" + kiosk);
         } catch (Throwable e) {
             log(ctx, Const.LOG_WARN, "Battery optimisation check failed: " + e);

@@ -38,18 +38,18 @@ public class KioskWatchdogService extends Service {
     private static final int NOTIFICATION_ID = 24024;
     private static final String SETTING_REBOOT_TIME = "reboot_time";
     private static final String SETTING_SECONDS = "kiosk_watchdog_seconds";
-    private static final int DEFAULT_SECONDS = 30;
-    private static final int MIN_SECONDS = 10;
     private static final int LAUNCHER_IN_FRONT_LIMIT = 4;
 
     private HandlerThread thread;
     private Handler handler;
     private WatchdogPolicy policy;
-    private long intervalMs = DEFAULT_SECONDS * 1000L;
+    private long intervalMs = WatchdogPolicy.DEFAULT_SECONDS * 1000L;
     private boolean receiverRegistered;
     private boolean tickPending;
     private long lastRelaunchAt;
     private boolean lastKioskAppMissing;
+    private String lastCappedValue;
+    private PowerManager.WakeLock wakeLock;
 
     private final Runnable tickRunnable = new Runnable() {
         @Override
@@ -122,6 +122,16 @@ public class KioskWatchdogService extends Service {
         thread.start();
         handler = new Handler(thread.getLooper());
         registerPackageReceiver();
+        try {
+            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (pm != null) {
+                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "locker24:watchdog");
+                wakeLock.setReferenceCounted(false);
+                wakeLock.acquire();
+            }
+        } catch (Throwable e) {
+            safeLog(Const.LOG_WARN, "Cannot take watchdog wake lock: " + e);
+        }
     }
 
     @Override
@@ -156,6 +166,13 @@ public class KioskWatchdogService extends Service {
 
     @Override
     public void onDestroy() {
+        try {
+            if (wakeLock != null && wakeLock.isHeld()) {
+                wakeLock.release();
+            }
+        } catch (Throwable ignored) {
+        }
+        wakeLock = null;
         if (receiverRegistered) {
             try {
                 unregisterReceiver(packageReceiver);
@@ -212,8 +229,12 @@ public class KioskWatchdogService extends Service {
             return;
         }
         safeLog(Const.LOG_INFO, "Scheduled reboot");
-        DevicePolicyManager dpm = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
-        dpm.reboot(LegacyUtils.getAdminComponentName(ctx));
+        try {
+            DevicePolicyManager dpm = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
+            dpm.reboot(LegacyUtils.getAdminComponentName(ctx));
+        } catch (Throwable e) {
+            safeLog(Const.LOG_WARN, "Scheduled reboot failed: " + e);
+        }
     }
 
     private void watchdogTick() {
@@ -286,17 +307,23 @@ public class KioskWatchdogService extends Service {
     }
 
     private long readIntervalMs() {
-        int seconds = DEFAULT_SECONDS;
+        String value = null;
         try {
-            String value = SettingsHelper.getInstance(getApplicationContext())
+            value = SettingsHelper.getInstance(getApplicationContext())
                     .getAppPreference(getPackageName(), SETTING_SECONDS);
-            if (value != null) {
-                seconds = Integer.parseInt(value.trim());
-            }
         } catch (Throwable ignored) {
-            seconds = DEFAULT_SECONDS;
         }
-        return Math.max(MIN_SECONDS, seconds) * 1000L;
+        int seconds = WatchdogPolicy.intervalSeconds(value);
+        try {
+            if (value != null && Integer.parseInt(value.trim()) > WatchdogPolicy.MAX_SECONDS
+                    && !value.trim().equals(lastCappedValue)) {
+                lastCappedValue = value.trim();
+                safeLog(Const.LOG_WARN, SETTING_SECONDS + "=" + lastCappedValue + " capped to "
+                        + WatchdogPolicy.MAX_SECONDS + " so the reboot window is not missed");
+            }
+        } catch (NumberFormatException ignored) {
+        }
+        return seconds * 1000L;
     }
 
     private void registerPackageReceiver() {

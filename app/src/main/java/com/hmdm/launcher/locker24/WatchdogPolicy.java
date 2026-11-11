@@ -73,4 +73,20 @@ public final class WatchdogPolicy {
         lockTaskLostCount = 0;
         launcherInFrontCount = 0;
     }
+
+    public static final int DEFAULT_SECONDS = 30;
+    public static final int MIN_SECONDS = 10;
+    public static final int MAX_SECONDS = 240;
+
+    public static int intervalSeconds(String value) {
+        int seconds = DEFAULT_SECONDS;
+        try {
+            if (value != null) {
+                seconds = Integer.parseInt(value.trim());
+            }
+        } catch (NumberFormatException e) {
+            seconds = DEFAULT_SECONDS;
+        }
+        return Math.min(MAX_SECONDS, Math.max(MIN_SECONDS, seconds));
+    }
 }
