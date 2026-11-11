@@ -109,4 +109,35 @@ public class WatchdogPolicyTest {
         for (int i = 0; i < 10; i++) assertEquals(NONE, p.evaluate(true, true, true, true, false));
         for (int i = 0; i < 10; i++) assertEquals(NONE, p.evaluate(true, true, false, false, false));
     }
+
+    @Test public void screenOffInFrontRelaunchHappensOnlyOnce() {
+        WatchdogPolicy p = new WatchdogPolicy(4);
+        assertEquals(NONE, p.evaluate(true, false, true, true, true));
+        assertEquals(NONE, p.evaluate(true, false, true, true, false));
+        assertEquals(NONE, p.evaluate(true, false, true, true, false));
+        assertEquals(RELAUNCH, p.evaluate(true, false, true, true, false));
+        for (int i = 0; i < 120; i++) assertEquals(NONE, p.evaluate(true, false, true, true, false));
+    }
+
+    @Test public void lockLostWhileScreenOffRelaunchesOncePerPeriod() {
+        WatchdogPolicy p = new WatchdogPolicy(4);
+        int count = 0;
+        for (int i = 0; i < 120; i++) {
+            if (p.evaluate(true, false, false, false, false) == RELAUNCH) count++;
+        }
+        assertEquals(1, count);
+        assertEquals(NONE, p.evaluate(true, false, true, false, true));
+        assertEquals(NONE, p.evaluate(true, false, false, false, true));
+        assertEquals(RELAUNCH, p.evaluate(true, false, false, false, true));
+    }
+
+    @Test public void oneInteractiveInFrontTickThenScreenOffGivesOneRelaunch() {
+        WatchdogPolicy p = new WatchdogPolicy(4);
+        int count = 0;
+        if (p.evaluate(true, false, true, true, true) == RELAUNCH) count++;
+        for (int i = 0; i < 120; i++) {
+            if (p.evaluate(true, false, true, true, false) == RELAUNCH) count++;
+        }
+        assertEquals(1, count);
+    }
 }

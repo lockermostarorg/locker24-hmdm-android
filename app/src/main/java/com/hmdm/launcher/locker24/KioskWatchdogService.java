@@ -126,6 +126,10 @@ public class KioskWatchdogService extends Service {
         } catch (Throwable e) {
             safeLog(Const.LOG_WARN, "Kiosk watchdog startForeground failed: " + e);
         }
+        if (!Utils.isDeviceOwner(this)) {
+            stopSelf();
+            return START_NOT_STICKY;
+        }
         final Handler h = handler;
         if (h != null) {
             h.post(new Runnable() {
