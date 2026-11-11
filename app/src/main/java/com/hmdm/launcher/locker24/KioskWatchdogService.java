@@ -9,12 +9,12 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.pm.ServiceInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
+import android.os.PowerManager;
 import android.os.Process;
 
 import com.hmdm.launcher.Const;
@@ -22,6 +22,7 @@ import com.hmdm.launcher.helper.SettingsHelper;
 import com.hmdm.launcher.json.ServerConfig;
 import com.hmdm.launcher.pro.ProUtils;
 import com.hmdm.launcher.ui.MainActivity;
+import com.hmdm.launcher.util.Utils;
 import com.hmdm.launcher.util.RemoteLogger;
 
 import java.util.List;
@@ -41,17 +42,23 @@ public class KioskWatchdogService extends Service {
     private WatchdogPolicy policy;
     private long intervalMs = DEFAULT_SECONDS * 1000L;
     private boolean receiverRegistered;
+    private boolean tickPending;
+    private long lastRelaunchAt;
+    private boolean lastKioskAppMissing;
 
     private final Runnable tickRunnable = new Runnable() {
         @Override
         public void run() {
+            tickPending = false;
             try {
                 onTick();
             } catch (Throwable e) {
                 safeLog(Const.LOG_WARN, "Kiosk watchdog tick failed: " + e);
             }
-            if (handler != null) {
-                handler.postDelayed(this, intervalMs);
+            Handler h = handler;
+            if (h != null) {
+                h.postDelayed(this, intervalMs);
+                tickPending = true;
             }
         }
     };
@@ -60,12 +67,17 @@ public class KioskWatchdogService extends Service {
         @Override
         public void onReceive(Context context, Intent intent) {
             try {
+                if (Intent.ACTION_PACKAGE_ADDED.equals(intent.getAction())
+                        && intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)) {
+                    return;
+                }
                 Uri data = intent.getData();
                 String pkg = data != null ? data.getSchemeSpecificPart() : null;
                 if (pkg == null || !pkg.equals(mainApp())) {
                     return;
                 }
-                if (ProUtils.kioskModeRequired(context) && !KioskState.isAdminUnlocked(context)) {
+                if (ProUtils.kioskModeRequired(context) && !KioskState.isAdminUnlocked(context)
+                        && !ProUtils.isKioskModeRunning(context)) {
                     safeLog(Const.LOG_INFO, "Kiosk app " + pkg + " changed, relaunching launcher");
                     relaunch();
                 }
@@ -77,6 +89,9 @@ public class KioskWatchdogService extends Service {
 
     public static void start(Context context, String action) {
         try {
+            if (!Utils.isDeviceOwner(context)) {
+                return;
+            }
             Intent intent = new Intent(context, KioskWatchdogService.class);
             if (action != null) {
                 intent.setAction(action);
@@ -116,9 +131,14 @@ public class KioskWatchdogService extends Service {
             h.post(new Runnable() {
                 @Override
                 public void run() {
-                    intervalMs = readIntervalMs();
-                    h.removeCallbacks(tickRunnable);
-                    h.postDelayed(tickRunnable, intervalMs);
+                    long newInterval = readIntervalMs();
+                    boolean changed = newInterval != intervalMs;
+                    intervalMs = newInterval;
+                    if (changed || !tickPending) {
+                        h.removeCallbacks(tickRunnable);
+                        h.postDelayed(tickRunnable, intervalMs);
+                        tickPending = true;
+                    }
                 }
             });
         }
@@ -157,15 +177,37 @@ public class KioskWatchdogService extends Service {
         boolean adminUnlocked = KioskState.isAdminUnlocked(ctx);
         boolean lockTaskLocked = ProUtils.isKioskModeRunning(ctx);
         boolean launcherInFront = isLauncherInFront();
-        WatchdogPolicy.Action action = policy.evaluate(required, adminUnlocked, lockTaskLocked, launcherInFront);
-        if (action == WatchdogPolicy.Action.RELAUNCH) {
-            safeLog(Const.LOG_WARN, "Kiosk watchdog relaunching launcher (lockTask=" + lockTaskLocked
-                    + ", inFront=" + launcherInFront + ")");
-            relaunch();
+        PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+        boolean interactive = pm == null || pm.isInteractive();
+        WatchdogPolicy.Action action = policy.evaluate(required, adminUnlocked, lockTaskLocked, launcherInFront,
+                interactive);
+        if (action != WatchdogPolicy.Action.RELAUNCH) {
+            return;
         }
+        if (!lockTaskLocked) {
+            boolean missing = !ProUtils.isKioskAppInstalled(ctx);
+            if (missing != lastKioskAppMissing) {
+                lastKioskAppMissing = missing;
+                safeLog(Const.LOG_INFO, missing ? "Kiosk watchdog paused: kiosk app not installed"
+                        : "Kiosk watchdog resumed: kiosk app installed");
+            }
+            if (missing) {
+                return;
+            }
+        } else if (ctx.getPackageName().equals(mainApp())) {
+            return;
+        }
+        safeLog(Const.LOG_WARN, "Kiosk watchdog relaunching launcher (lockTask=" + lockTaskLocked
+                + ", inFront=" + launcherInFront + ")");
+        relaunch();
     }
 
     private void relaunch() {
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (lastRelaunchAt != 0 && now - lastRelaunchAt < 5000) {
+            return;
+        }
+        lastRelaunchAt = now;
         try {
             Intent intent = new Intent(getApplicationContext(), MainActivity.class);
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
@@ -249,11 +291,7 @@ public class KioskWatchdogService extends Service {
                 .setContentTitle("Locker24 MDM")
                 .setOngoing(true)
                 .build();
-        if (Build.VERSION.SDK_INT >= 34) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED);
-        } else {
-            startForeground(NOTIFICATION_ID, notification);
-        }
+        Utils.startStableForegroundService(this, NOTIFICATION_ID, notification);
     }
 
     private void safeLog(int level, String message) {

@@ -88,4 +88,25 @@ public class WatchdogPolicyTest {
         assertEquals(RELAUNCH, p.evaluate(true, false, true, true));
         assertEquals(NONE, p.evaluate(true, false, true, false));
     }
+
+    @Test public void screenOffKeepsLastInteractiveInFrontState() {
+        WatchdogPolicy p = new WatchdogPolicy(4);
+        assertEquals(NONE, p.evaluate(true, false, true, true, true));
+        assertEquals(NONE, p.evaluate(true, false, true, true, true));
+        assertEquals(NONE, p.evaluate(true, false, true, false, false));
+        assertEquals(RELAUNCH, p.evaluate(true, false, true, false, false));
+    }
+
+    @Test public void screenOffAfterKioskInFrontNeverRelaunches() {
+        WatchdogPolicy p = new WatchdogPolicy(4);
+        assertEquals(NONE, p.evaluate(true, false, true, false, true));
+        for (int i = 0; i < 10; i++) assertEquals(NONE, p.evaluate(true, false, true, true, false));
+    }
+
+    @Test public void adminUnlockedSuppressesWhileNotInteractive() {
+        WatchdogPolicy p = new WatchdogPolicy(4);
+        assertEquals(NONE, p.evaluate(true, false, true, true, true));
+        for (int i = 0; i < 10; i++) assertEquals(NONE, p.evaluate(true, true, true, true, false));
+        for (int i = 0; i < 10; i++) assertEquals(NONE, p.evaluate(true, true, false, false, false));
+    }
 }

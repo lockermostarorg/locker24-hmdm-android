@@ -8,12 +8,23 @@ public final class WatchdogPolicy {
     private final int launcherInFrontLimit;
     private int lockTaskLostCount;
     private int launcherInFrontCount;
+    private boolean lastInteractiveInFront;
 
     public WatchdogPolicy(int launcherInFrontLimit) {
         this.launcherInFrontLimit = Math.max(1, launcherInFrontLimit);
     }
 
     public Action evaluate(boolean required, boolean adminUnlocked, boolean lockTaskLocked, boolean launcherInFront) {
+        return evaluate(required, adminUnlocked, lockTaskLocked, launcherInFront, true);
+    }
+
+    public Action evaluate(boolean required, boolean adminUnlocked, boolean lockTaskLocked, boolean launcherInFront,
+                           boolean interactive) {
+        if (interactive) {
+            lastInteractiveInFront = launcherInFront;
+        } else {
+            launcherInFront = lastInteractiveInFront;
+        }
         if (!required || adminUnlocked) {
             reset();
             return Action.NONE;

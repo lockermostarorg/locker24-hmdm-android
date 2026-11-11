@@ -3,16 +3,21 @@
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <application>
         <service
             android:name="com.hmdm.launcher.locker24.KioskWatchdogService"
             android:exported="false"
-            android:foregroundServiceType="systemExempted" />
+            android:foregroundServiceType="specialUse|systemExempted">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Kiosk watchdog" />
+        </service>
 
         <receiver
             android:name="com.hmdm.launcher.locker24.SelfUpdateReceiver"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
@@ -20,7 +25,7 @@
 
         <receiver
             android:name="com.hmdm.launcher.locker24.BootWatchdogReceiver"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
