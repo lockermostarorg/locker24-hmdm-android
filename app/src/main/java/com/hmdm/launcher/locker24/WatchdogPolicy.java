@@ -10,7 +10,7 @@ public final class WatchdogPolicy {
     private int launcherInFrontCount;
 
     public WatchdogPolicy(int launcherInFrontLimit) {
-        this.launcherInFrontLimit = launcherInFrontLimit;
+        this.launcherInFrontLimit = Math.max(1, launcherInFrontLimit);
     }
 
     public Action evaluate(boolean required, boolean adminUnlocked, boolean lockTaskLocked, boolean launcherInFront) {

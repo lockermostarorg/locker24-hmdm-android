@@ -82,4 +82,10 @@ public class WatchdogPolicyTest {
         for (int i = 0; i < 3; i++) assertEquals(NONE, q.evaluate(true, false, true, true));
         assertEquals(RELAUNCH, q.evaluate(true, false, true, true));
     }
+
+    @Test public void limitZeroBehavesLikeLimitOne() {
+        WatchdogPolicy p = new WatchdogPolicy(0);
+        assertEquals(RELAUNCH, p.evaluate(true, false, true, true));
+        assertEquals(NONE, p.evaluate(true, false, true, false));
+    }
 }

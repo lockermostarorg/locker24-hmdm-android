@@ -21,6 +21,13 @@ public class RebootScheduleTest {
         assertNull(RebootSchedule.parse("25:00"));
         assertNull(RebootSchedule.parse("12:60"));
         assertNull(RebootSchedule.parse("4"));
+        assertArrayEquals(new int[]{4, 0}, RebootSchedule.parse("4:00"));
+        assertArrayEquals(new int[]{4, 0}, RebootSchedule.parse(" 04:00 "));
+        assertNull(RebootSchedule.parse("+4:00"));
+        assertNull(RebootSchedule.parse("-1:00"));
+        assertNull(RebootSchedule.parse("4:0"));
+        assertNull(RebootSchedule.parse("\u0664:00"));
+        assertNull(RebootSchedule.parse("04:\u0660\u0660"));
         assertNull(RebootSchedule.parse("ab:cd"));
     }
 
@@ -64,9 +71,12 @@ public class RebootScheduleTest {
         assertFalse(RebootSchedule.isDue(LocalDateTime.of(2026, 11, 11, 23, 57), at, LocalDate.of(2026, 11, 10), 5 * HOUR));
     }
 
-    @Test public void midnightWindowOncePerWindow() {
+    @Test public void doubleRebootAcrossMidnightBlockedByUptimeGuard() {
         int[] at = {23, 58};
-        assertFalse(RebootSchedule.isDue(LocalDateTime.of(2026, 11, 12, 0, 1), at, LocalDate.of(2026, 11, 11), 5 * HOUR));
-        assertFalse(RebootSchedule.isDue(LocalDateTime.of(2026, 11, 11, 23, 59), at, LocalDate.of(2026, 11, 11), 5 * HOUR));
+        assertFalse(RebootSchedule.isDue(LocalDateTime.of(2026, 11, 12, 0, 1), at, LocalDate.of(2026, 11, 11), 2 * 60_000L));
+    }
+
+    @Test public void sameDateAsLastRebootIsNotDueEvenInsideWrappedWindow() {
+        assertFalse(RebootSchedule.isDue(LocalDateTime.of(2026, 11, 11, 23, 59), new int[]{23, 58}, LocalDate.of(2026, 11, 11), 5 * HOUR));
     }
 }
