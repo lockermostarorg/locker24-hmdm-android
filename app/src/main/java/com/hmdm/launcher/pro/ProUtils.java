@@ -28,6 +28,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.location.Location;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 import android.view.View;
 
@@ -77,6 +79,30 @@ public class ProUtils {
 
     private static DevicePolicyManager getDpm(Context context) {
         return (DevicePolicyManager) context.getSystemService(Context.DEVICE_POLICY_SERVICE);
+    }
+
+    private static void releaseDevicePolicies(Context context) {
+        DevicePolicyManager dpm = getDpm(context);
+        ComponentName admin = LegacyUtils.getAdminComponentName(context);
+        try {
+            if (!dpm.setStatusBarDisabled(admin, false)) {
+                Log.w(Const.LOG_TAG, "setStatusBarDisabled(false) returned false");
+            }
+        } catch (RuntimeException e) {
+            logError(context, "release: setStatusBarDisabled failed", e);
+        }
+        try {
+            if (!dpm.setKeyguardDisabled(admin, false)) {
+                Log.w(Const.LOG_TAG, "setKeyguardDisabled(false) returned false");
+            }
+        } catch (RuntimeException e) {
+            logError(context, "release: setKeyguardDisabled failed", e);
+        }
+        try {
+            dpm.setLockTaskPackages(admin, new String[0]);
+        } catch (RuntimeException e) {
+            logError(context, "release: setLockTaskPackages failed", e);
+        }
     }
 
     private static void applyLockTaskPackages(Context context, String app) {
@@ -193,8 +219,17 @@ public class ProUtils {
             boolean keyguardAllowed = config != null && Boolean.TRUE.equals(config.getKioskKeyguard());
             DevicePolicyManager dpm = getDpm(activity);
             ComponentName admin = LegacyUtils.getAdminComponentName(activity);
-            dpm.setKeyguardDisabled(admin, !keyguardAllowed);
-            dpm.setStatusBarDisabled(admin, true);
+            if (!dpm.setKeyguardDisabled(admin, !keyguardAllowed)) {
+                Log.w(Const.LOG_TAG, "setKeyguardDisabled returned false");
+                RemoteLogger.log(activity, Const.LOG_WARN, "setKeyguardDisabled returned false");
+            }
+            if (!dpm.setStatusBarDisabled(admin, true)) {
+                Log.w(Const.LOG_TAG, "setStatusBarDisabled returned false");
+                RemoteLogger.log(activity, Const.LOG_WARN, "setStatusBarDisabled returned false");
+            }
+            if (!isKioskModeRunning(activity)) {
+                intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK);
+            }
             KioskState.setAdminUnlocked(activity, false);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 activity.startActivity(intent, ActivityOptions.makeBasic().setLockTaskEnabled(true).toBundle());
@@ -203,6 +238,13 @@ public class ProUtils {
                 // start the app and rely on the allowlist only.
                 activity.startActivity(intent);
             }
+            final Context appContext = activity.getApplicationContext();
+            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                if (!isKioskModeRunning(appContext)) {
+                    Log.w(Const.LOG_TAG, "Lock task not engaged after kiosk start");
+                    RemoteLogger.log(appContext, Const.LOG_WARN, "Lock task not engaged after kiosk start");
+                }
+            }, 1000);
             return true;
         } catch (RuntimeException e) {
             logError(activity, "startCosuKioskMode failed", e);
@@ -240,18 +282,25 @@ public class ProUtils {
         }
         try {
             KioskState.setAdminUnlocked(activity, true);
-            DevicePolicyManager dpm = getDpm(activity);
-            ComponentName admin = LegacyUtils.getAdminComponentName(activity);
-            dpm.setLockTaskPackages(admin, new String[0]);
-            dpm.setKeyguardDisabled(admin, false);
-            dpm.setStatusBarDisabled(admin, false);
-            activity.stopLockTask();
         } catch (RuntimeException e) {
             logError(activity, "unlockKiosk failed", e);
+        }
+        releaseDevicePolicies(activity);
+        try {
+            activity.stopLockTask();
+        } catch (RuntimeException e) {
+            logError(activity, "stopLockTask failed", e);
         }
     }
 
     public static void processConfig(Context context, ServerConfig config) {
+        try {
+            if (Utils.isDeviceOwner(context) && !kioskModeRequired(context) && !isKioskModeRunning(context)) {
+                releaseDevicePolicies(context);
+            }
+        } catch (RuntimeException e) {
+            logError(context, "processConfig release failed", e);
+        }
         try {
             Locker24Hooks.onConfig(context, config);
         } catch (RuntimeException e) {

@@ -175,6 +175,7 @@ android {
             buildConfigField("String", "SECONDARY_BASE_URL", "\"https://mdm.locker24.app\"")
             buildConfigField("String", "REQUEST_SIGNATURE", "\"${locker24Props['requestSignature'] ?: ''}\"")
             buildConfigField("String", "LIBRARY_API_KEY", "\"${locker24Props['libraryApiKey'] ?: ''}\"")
+            buildConfigField("Boolean", "ENABLE_KIOSK_WITHOUT_OVERLAYS", "true")
             if (locker24PropsFile.exists()) {
                 signingConfig signingConfigs.locker24
             }
