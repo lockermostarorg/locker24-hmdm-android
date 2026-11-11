@@ -1,6 +1,7 @@
 package com.hmdm.launcher.locker24;
 
 import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -78,5 +79,13 @@ public class RebootScheduleTest {
 
     @Test public void sameDateAsLastRebootIsNotDueEvenInsideWrappedWindow() {
         assertFalse(RebootSchedule.isDue(LocalDateTime.of(2026, 11, 11, 23, 59), new int[]{23, 58}, LocalDate.of(2026, 11, 11), 5 * HOUR));
+    }
+
+    @Test public void lastRebootDateOrNull() {
+        assertEquals(LocalDate.of(2026, 11, 10), RebootSchedule.lastRebootDateOrNull("2026-11-10"));
+        assertNull(RebootSchedule.lastRebootDateOrNull(null));
+        assertNull(RebootSchedule.lastRebootDateOrNull(""));
+        assertNull(RebootSchedule.lastRebootDateOrNull("garbage"));
+        assertNull(RebootSchedule.lastRebootDateOrNull("2026-13-45"));
     }
 }

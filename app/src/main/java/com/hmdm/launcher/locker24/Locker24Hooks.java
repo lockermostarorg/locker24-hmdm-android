@@ -15,6 +15,14 @@ public class Locker24Hooks {
                 return;
             }
             KioskWatchdogService.start(context, KioskWatchdogService.ACTION_RECHECK);
+            try {
+                DevicePolicies.apply(context);
+            } catch (Throwable e) {
+                try {
+                    RemoteLogger.log(context, Const.LOG_WARN, "Locker24 device policies failed: " + e);
+                } catch (Throwable ignored) {
+                }
+            }
         } catch (Throwable e) {
             try {
                 RemoteLogger.log(context, Const.LOG_WARN, "Locker24 config hook failed: " + e);

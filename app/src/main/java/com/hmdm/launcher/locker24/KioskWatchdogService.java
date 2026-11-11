@@ -5,6 +5,7 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
+import android.app.admin.DevicePolicyManager;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -22,9 +23,12 @@ import com.hmdm.launcher.helper.SettingsHelper;
 import com.hmdm.launcher.json.ServerConfig;
 import com.hmdm.launcher.pro.ProUtils;
 import com.hmdm.launcher.ui.MainActivity;
+import com.hmdm.launcher.util.LegacyUtils;
 import com.hmdm.launcher.util.Utils;
 import com.hmdm.launcher.util.RemoteLogger;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 public class KioskWatchdogService extends Service {
@@ -32,6 +36,7 @@ public class KioskWatchdogService extends Service {
 
     private static final String CHANNEL_ID = "locker24_watchdog";
     private static final int NOTIFICATION_ID = 24024;
+    private static final String SETTING_REBOOT_TIME = "reboot_time";
     private static final String SETTING_SECONDS = "kiosk_watchdog_seconds";
     private static final int DEFAULT_SECONDS = 30;
     private static final int MIN_SECONDS = 10;
@@ -174,8 +179,44 @@ public class KioskWatchdogService extends Service {
         return null;
     }
 
-    /** Runs on the watchdog thread once per interval. Task 7 adds the scheduled reboot check here. */
+    /** Runs on the watchdog thread once per interval. */
     protected void onTick() {
+        try {
+            watchdogTick();
+        } finally {
+            try {
+                checkScheduledReboot();
+            } catch (Throwable e) {
+                safeLog(Const.LOG_WARN, "Scheduled reboot check failed: " + e);
+            }
+        }
+    }
+
+    private void checkScheduledReboot() {
+        Context ctx = getApplicationContext();
+        String configured = SettingsHelper.getInstance(ctx).getAppPreference(ctx.getPackageName(), SETTING_REBOOT_TIME);
+        int[] at = RebootSchedule.parse(configured);
+        if (at == null) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        LocalDate last = RebootSchedule.lastRebootDateOrNull(KioskState.getLastRebootDate(ctx));
+        if (!RebootSchedule.isDue(now, at, last, android.os.SystemClock.elapsedRealtime())) {
+            return;
+        }
+        if (!Utils.isDeviceOwner(ctx)) {
+            return;
+        }
+        if (!KioskState.setLastRebootDate(ctx, now.toLocalDate().toString())) {
+            safeLog(Const.LOG_WARN, "Scheduled reboot skipped: cannot persist last reboot date");
+            return;
+        }
+        safeLog(Const.LOG_INFO, "Scheduled reboot");
+        DevicePolicyManager dpm = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
+        dpm.reboot(LegacyUtils.getAdminComponentName(ctx));
+    }
+
+    private void watchdogTick() {
         Context ctx = getApplicationContext();
         boolean required = ProUtils.kioskModeRequired(ctx);
         boolean adminUnlocked = KioskState.isAdminUnlocked(ctx);

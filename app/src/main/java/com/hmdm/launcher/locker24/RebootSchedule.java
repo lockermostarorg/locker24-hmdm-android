@@ -32,6 +32,17 @@ public final class RebootSchedule {
         return new int[]{h, m};
     }
 
+    public static LocalDate lastRebootDateOrNull(String stored) {
+        if (stored == null) {
+            return null;
+        }
+        try {
+            return LocalDate.parse(stored.trim());
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
     public static boolean isDue(LocalDateTime now, int[] at, LocalDate lastRebootDate, long uptimeMs) {
         if (now == null || at == null || at.length != 2) {
             return false;
