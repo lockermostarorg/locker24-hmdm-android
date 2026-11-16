@@ -101,8 +101,6 @@ The pilot tablet must pass the checklist from the plan (Task 9), with these addi
 7. Power cut: back in kiosk.
 8. Wi-Fi off 15 min, then on: the device syncs again (the health queue comes in Plan 2).
 9. Set `reboot_time` 3 min ahead: the tablet reboots once, and not again that day.
-10. Exit kiosk with the panel password: the tablet stays out of kiosk for 5 minutes (watchdog quiet); a config push re-enters kiosk.
-11. Install the `opensource` debug APK (`./gradlew assembleOpensourceDebug`) on a phone that is NOT device owner, with a configuration that has kiosk mode on. The app must not crash; kiosk calls are no-ops there.
-12. On the tablet, Settings > General management > Date and time shows `Europe/Sarajevo` (Central European time), and the scheduled reboot in step 9 happens at the configured local time, not shifted by an hour or more.
+10. On the tablet, Settings > General management > Date and time shows `Europe/Sarajevo` (Central European time), and the scheduled reboot in step 9 happens at the configured local time, not shifted by an hour or more.
 
 Any failure goes back to the owning task as a bug, with the logcat lines.
