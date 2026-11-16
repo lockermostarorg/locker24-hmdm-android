@@ -57,7 +57,7 @@ public class RemoteLogWorker extends Worker {
 
     private static final String WORK_TAG_REMOTE_LOG = "com.hmdm.launcher.WORK_TAG_REMOTE_LOG";
 
-    private static boolean uploadScheduled = false;
+    private static volatile boolean uploadScheduled = false;
 
     // A replaced (cancelled) worker keeps running doWork(), so two workers may run at once
     private static final LogDrain<RemoteLogItem> DRAIN = new LogDrain<>();
