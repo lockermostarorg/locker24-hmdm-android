@@ -27,11 +27,51 @@ public class HealthReporterPolicyTest {
 
     @Test
     public void longTickStillCollectsWithinOneTickOfTheInterval() {
-        long tick = 240_000L;
-        long tolerance = HealthSchedule.toleranceMs(tick);
-        long last = 1_000_000L;
-        assertFalse(HealthSchedule.isDue(last + 239_999, last, 5, tolerance));
-        assertTrue(HealthSchedule.isDue(last + 240_000, last, 5, tolerance));
+        for (long tick : new long[]{120_000L, 240_000L}) {
+            List<Long> collected = simulateTicks(tick, 2_000L, 3_600_000L);
+            for (int i = 1; i < collected.size(); i++) {
+                assertEquals("tick " + tick, 240_000L, collected.get(i) - collected.get(i - 1));
+            }
+        }
+    }
+
+    @Test
+    public void defaultTickCollectsEveryFiveMinutes() {
+        List<Long> collected = simulateTicks(30_000L, 2_000L, 3_600_000L);
+        for (int i = 1; i < collected.size(); i++) {
+            assertEquals(300_000L, collected.get(i) - collected.get(i - 1));
+        }
+    }
+
+    @Test
+    public void stampIsTheSnapshotTime() {
+        HealthSnapshot s = new HealthSnapshot();
+        s.ts = 1_234L;
+        assertEquals(1_234L, HealthSchedule.collectStamp(s, 9_999L));
+        assertEquals(9_999L, HealthSchedule.collectStamp(new HealthSnapshot(), 9_999L));
+        assertEquals(9_999L, HealthSchedule.collectStamp(null, 9_999L));
+    }
+
+    /**
+     * Ticks every {@code tick} ms; a due tick takes a snapshot at the tick time and finishes
+     * {@code collectMs} later, when the reporter stamps it through {@code collectStamp}.
+     * Returns the tick times that collected.
+     */
+    private static List<Long> simulateTicks(long tick, long collectMs, long durationMs) {
+        long start = 1_700_000_000_000L;
+        long lastCollectAt = 0;
+        List<Long> collected = new ArrayList<>();
+        for (long now = start; now <= start + durationMs; now += tick) {
+            if (HealthSchedule.isDue(now, lastCollectAt, 5, HealthSchedule.toleranceMs(tick))) {
+                HealthSnapshot s = new HealthSnapshot();
+                s.ts = now;
+                long finishedAt = now + collectMs;
+                lastCollectAt = HealthSchedule.collectStamp(s, finishedAt);
+                collected.add(now);
+            }
+        }
+        assertTrue(collected.size() > 2);
+        return collected;
     }
 
     @Test

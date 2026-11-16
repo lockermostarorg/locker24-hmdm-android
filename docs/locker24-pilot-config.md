@@ -64,7 +64,7 @@ Expected: `UPDATE 1`, then `hpmo-qa | t`. Then open the configuration in the pan
 | `kiosk_watchdog_seconds` | `30` | clamped to 10..240, default 30 |
 | `reboot_time` | `04:00` | use 04:00 or later; a time between 02:00 and 02:59 is skipped once a year by the spring DST change |
 | `stay_on_plugged` | `1` | `0` turns stay-on off, anything else turns it on |
-| `health_interval_minutes` | `5` | health report interval, clamped to 1..60, default 5; a charging or network change also reports after 30 s, a kiosk change after 60 s |
+| `health_interval_minutes` | `5` | health report interval, clamped to 1..8, default 5. The cap is 8 because the server marks a tablet offline after 10 min without a report. A charging or network change also reports after 30 s, a kiosk change after 60 s. When the watchdog service is not running, only the 15-min WorkManager safety net reports, so that tablet shows red offline between reports. |
 
 Battery-optimisation status shows in the device log as `battery_opt agent=... kiosk=...`.
 

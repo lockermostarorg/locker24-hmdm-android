@@ -15,8 +15,16 @@ public class HealthScheduleTest {
         assertEquals(5, HealthSchedule.intervalMinutes(""));
         assertEquals(5, HealthSchedule.intervalMinutes("abc"));
         assertEquals(1, HealthSchedule.intervalMinutes("0"));
-        assertEquals(60, HealthSchedule.intervalMinutes("61"));
-        assertEquals(15, HealthSchedule.intervalMinutes("15"));
+        assertEquals(8, HealthSchedule.intervalMinutes("8"));
+        assertEquals(8, HealthSchedule.intervalMinutes("9"));
+        assertEquals(8, HealthSchedule.intervalMinutes("15"));
+        assertEquals(8, HealthSchedule.intervalMinutes("61"));
+    }
+
+    @Test
+    public void intervalStaysBelowTheServersTenMinuteOfflineRule() {
+        assertEquals(8, HealthSchedule.intervalMinutes(String.valueOf(Integer.MAX_VALUE)));
+        assertTrue(HealthSchedule.intervalMinutes("10") * 60_000L < 10 * 60_000L);
     }
 
     @Test

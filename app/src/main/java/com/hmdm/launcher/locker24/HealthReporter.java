@@ -179,7 +179,7 @@ public final class HealthReporter {
             } catch (RuntimeException e) {
                 log(ctx, Const.LOG_WARN, "Health report dropped, queue not saved: " + e.getMessage());
             }
-            HealthCounters.setLastCollectAt(ctx, System.currentTimeMillis());
+            HealthCounters.setLastCollectAt(ctx, HealthSchedule.collectStamp(snapshot, System.currentTimeMillis()));
             HealthUploadWorker.enqueue(ctx);
         } catch (Throwable e) {
             logError(ctx, "Health collect failed: ", e);

@@ -6,7 +6,8 @@ public final class HealthSchedule {
 
     private static final int DEFAULT_MINUTES = 5;
     private static final int MIN_MINUTES = 1;
-    private static final int MAX_MINUTES = 60;
+    /** Below the server's fixed 10-minute offline rule. */
+    private static final int MAX_MINUTES = 8;
     private static final long TOLERANCE_MS = 15_000L;
     private static final long MAX_TOLERANCE_MS = 60_000L;
     private static final String TRIGGER_BOOT = "boot";
@@ -43,5 +44,13 @@ public final class HealthSchedule {
     /** A pending boot request keeps its name when a later request reschedules it. */
     public static String mergeTrigger(String pending, String incoming) {
         return TRIGGER_BOOT.equals(pending) ? TRIGGER_BOOT : incoming;
+    }
+
+    /**
+     * The time {@code last_collect_at} is stamped with: the snapshot's start, so the time a
+     * collection takes does not push the next due check past a tick boundary.
+     */
+    public static long collectStamp(HealthSnapshot snapshot, long finishedAt) {
+        return snapshot != null && snapshot.ts != null ? snapshot.ts : finishedAt;
     }
 }
