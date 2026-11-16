@@ -100,7 +100,7 @@ The pilot tablet must pass the checklist from the plan (Task 9), with these addi
 6. Reboot: back in kiosk.
 7. Power cut: back in kiosk.
 8. Wi-Fi off 15 min, then on: the device syncs again (the health queue comes in Plan 2).
-9. Set `reboot_time` 3 min ahead: the tablet reboots once, and not again that day.
+9. Set `reboot_time` 3 min ahead: the tablet reboots once, and not again that day. The tablet must have been up for at least 1 hour: the agent never does a scheduled reboot in the first hour after boot.
 10. On the tablet, Settings > General management > Date and time shows `Europe/Sarajevo` (Central European time), and the scheduled reboot in step 9 happens at the configured local time, not shifted by an hour or more.
 
 Any failure goes back to the owning task as a bug, with the logcat lines.
