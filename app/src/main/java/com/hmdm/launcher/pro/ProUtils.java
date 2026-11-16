@@ -30,6 +30,7 @@ import android.location.Location;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.util.Log;
 import android.view.View;
 
@@ -39,6 +40,7 @@ import com.hmdm.launcher.R;
 import com.hmdm.launcher.helper.SettingsHelper;
 import com.hmdm.launcher.json.ServerConfig;
 import com.hmdm.launcher.locker24.KioskPolicy;
+import com.hmdm.launcher.locker24.KioskStartPolicy;
 import com.hmdm.launcher.locker24.KioskState;
 import com.hmdm.launcher.locker24.Locker24Hooks;
 import com.hmdm.launcher.locker24.OrientationPolicy;
@@ -46,6 +48,7 @@ import com.hmdm.launcher.util.LegacyUtils;
 import com.hmdm.launcher.util.RemoteLogger;
 import com.hmdm.launcher.util.Utils;
 
+import java.lang.ref.WeakReference;
 import java.util.Calendar;
 
 /**
@@ -53,6 +56,8 @@ import java.util.Calendar;
  * In a free version, the class contains stubs
  */
 public class ProUtils {
+
+    private static volatile long lastKioskRetryAt;
 
     public static boolean isPro() {
         return false;
@@ -263,11 +268,19 @@ public class ProUtils {
             }
             applyConfiguredOrientation(activity, "kiosk start");
             boolean kioskRunning = isKioskModeRunning(activity);
-            if (!kioskRunning) {
+            long replacedAt = isLocker24() ? KioskState.getKioskAppReplacedAt(activity) : 0;
+            long now = SystemClock.elapsedRealtime();
+            boolean replaced = isLocker24() && KioskStartPolicy.replacedRecently(replacedAt, now);
+            boolean clearTask = KioskStartPolicy.clearTask(kioskRunning, replaced);
+            if (clearTask) {
                 intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK);
             }
             RemoteLogger.log(activity, Const.LOG_DEBUG, "Kiosk start " + kioskApp + ": lockTaskRunning=" + kioskRunning
-                    + ", clearTask=" + !kioskRunning + ", " + Utils.orientationDiag(activity));
+                    + ", clearTask=" + clearTask + ", " + Utils.orientationDiag(activity));
+            if (replaced && kioskRunning) {
+                RemoteLogger.log(activity, Const.LOG_INFO, "Kiosk start " + kioskApp + " forced fresh: app replaced "
+                        + ((now - replacedAt) / 1000) + " s ago");
+            }
             KioskState.setAdminUnlocked(activity, false);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 activity.startActivity(intent, ActivityOptions.makeBasic().setLockTaskEnabled(true).toBundle());
@@ -277,12 +290,8 @@ public class ProUtils {
                 activity.startActivity(intent);
             }
             final Context appContext = activity.getApplicationContext();
-            new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                if (!isKioskModeRunning(appContext)) {
-                    Log.w(Const.LOG_TAG, "Lock task not engaged after kiosk start");
-                    RemoteLogger.log(appContext, Const.LOG_WARN, "Lock task not engaged after kiosk start");
-                }
-            }, 1000);
+            scheduleEngageCheck(appContext, new WeakReference<>(activity), kioskApp, false,
+                    clearTask ? replacedAt : 0);
             new Handler(Looper.getMainLooper()).postDelayed(() ->
                     RemoteLogger.log(appContext, Const.LOG_DEBUG, "Kiosk start +5s: lockTaskRunning="
                             + isKioskModeRunning(appContext) + ", " + Utils.orientationDiag(appContext)), 5000);
@@ -290,6 +299,78 @@ public class ProUtils {
         } catch (RuntimeException e) {
             logError(activity, "startCosuKioskMode failed", e);
             return false;
+        }
+    }
+
+    private static void scheduleEngageCheck(final Context appContext, final WeakReference<Activity> activityRef,
+                                            final String kioskApp, final boolean retried, final long replacedMark) {
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            try {
+                boolean locked = isKioskModeRunning(appContext);
+                if (!locked) {
+                    String message = "Lock task not engaged after kiosk start" + (retried ? " retry" : "");
+                    Log.w(Const.LOG_TAG, message);
+                    RemoteLogger.log(appContext, Const.LOG_WARN, message);
+                }
+                if (!isLocker24()) {
+                    return;
+                }
+                if (KioskStartPolicy.consumeReplacedMark(replacedMark, locked)
+                        && KioskState.clearKioskAppReplaced(appContext, replacedMark)) {
+                    RemoteLogger.log(appContext, Const.LOG_DEBUG, "Kiosk app replacement handled, lock task engaged");
+                }
+                long now = SystemClock.elapsedRealtime();
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+                        && !kioskApp.equals(appContext.getPackageName())
+                        && KioskStartPolicy.shouldRetry(retried, locked, kioskModeRequired(appContext),
+                                KioskState.isAdminUnlocked(appContext), lastKioskRetryAt, now)) {
+                    lastKioskRetryAt = now;
+                    retryFreshKioskStart(appContext, activityRef, kioskApp);
+                }
+            } catch (RuntimeException e) {
+                logError(appContext, "Kiosk engage check failed", e);
+            }
+        }, KioskStartPolicy.ENGAGE_CHECK_MS);
+    }
+
+    private static void retryFreshKioskStart(Context appContext, WeakReference<Activity> activityRef, String kioskApp) {
+        Activity activity = activityRef.get();
+        boolean useActivity = activity != null && !activity.isFinishing() && !activity.isDestroyed();
+        Context starter = useActivity ? activity : appContext;
+        Intent intent = starter.getPackageManager().getLaunchIntentForPackage(kioskApp);
+        if (intent == null) {
+            RemoteLogger.log(appContext, Const.LOG_WARN, "Kiosk start retry skipped: no launch intent for " + kioskApp);
+            return;
+        }
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        if (useActivity) {
+            applyConfiguredOrientation(activity, "kiosk retry");
+        }
+        RemoteLogger.log(appContext, Const.LOG_WARN, "Kiosk start retry: starting " + kioskApp
+                + " fresh (from " + (useActivity ? "launcher" : "service context") + ", "
+                + Utils.orientationDiag(appContext) + ")");
+        starter.startActivity(intent, ActivityOptions.makeBasic().setLockTaskEnabled(true).toBundle());
+        scheduleEngageCheck(appContext, activityRef, kioskApp, true, KioskState.getKioskAppReplacedAt(appContext));
+    }
+
+    /**
+     * Called when the kiosk app is about to be installed, or was installed or replaced:
+     * the next kiosk start must not bring the old task forward (locker24 flavor only).
+     */
+    public static void onKioskAppInstallEvent(Context context, String packageName, String event) {
+        if (!isLocker24() || packageName == null) {
+            return;
+        }
+        try {
+            ServerConfig config = SettingsHelper.getInstance(context).getConfig();
+            if (config == null || !packageName.equals(config.getMainApp())) {
+                return;
+            }
+            KioskState.markKioskAppReplaced(context, SystemClock.elapsedRealtime());
+            RemoteLogger.log(context, Const.LOG_INFO, "Kiosk app " + packageName + " " + event
+                    + ": next kiosk start will be fresh");
+        } catch (RuntimeException e) {
+            logError(context, "onKioskAppInstallEvent failed", e);
         }
     }
 
