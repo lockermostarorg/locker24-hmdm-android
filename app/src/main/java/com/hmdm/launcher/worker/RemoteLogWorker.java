@@ -34,6 +34,7 @@ import com.hmdm.launcher.db.DatabaseHelper;
 import com.hmdm.launcher.db.LogTable;
 import com.hmdm.launcher.helper.SettingsHelper;
 import com.hmdm.launcher.json.RemoteLogItem;
+import com.hmdm.launcher.locker24.LogDrain;
 import com.hmdm.launcher.server.ServerService;
 import com.hmdm.launcher.server.ServerServiceKeeper;
 
@@ -58,8 +59,8 @@ public class RemoteLogWorker extends Worker {
 
     private static boolean uploadScheduled = false;
 
-    // A replaced (cancelled) worker keeps running doWork(), so two workers may drain the table at once
-    private static final Object UPLOAD_LOCK = new Object();
+    // A replaced (cancelled) worker keeps running doWork(), so two workers may run at once
+    private static final LogDrain<RemoteLogItem> DRAIN = new LogDrain<>();
 
     private Context context;
     private SettingsHelper settingsHelper;
@@ -97,41 +98,66 @@ public class RemoteLogWorker extends Worker {
     @Override
     // This is running in a background thread by WorkManager
     public Result doWork() {
-        synchronized (UPLOAD_LOCK) {
-            return drainLogs();
-        }
-    }
-
-    private Result drainLogs() {
+        final DatabaseHelper dbHelper = DatabaseHelper.instance(context);
+        LogDrain.Outcome outcome;
         try {
-            DatabaseHelper dbHelper = DatabaseHelper.instance(context);
+            outcome = DRAIN.drain(new LogDrain.Store<RemoteLogItem>() {
+                @Override
+                public List<RemoteLogItem> select(int limit) {
+                    List<RemoteLogItem> unsentItems = LogTable.select(dbHelper.getReadableDatabase(), limit);
+                    Log.i(Const.LOG_TAG, "Remote logger: unsent items: " + unsentItems.size());
+                    return unsentItems;
+                }
 
-            while (true) {
-                List<RemoteLogItem> unsentItems = LogTable.select(dbHelper.getReadableDatabase(), MAX_UPLOADED_MESSAGES);
-                Log.i(Const.LOG_TAG, "Remote logger: unsent items: " + unsentItems.size());
-                if (unsentItems.size() == 0) {
-                    uploadScheduled = false;
-                    return Result.success();
+                @Override
+                public boolean upload(List<RemoteLogItem> items) {
+                    return RemoteLogWorker.this.upload(items);
                 }
-                if (!upload(unsentItems)) {
-                    // There was an error: retry!
-                    // XXX: we do not use Result.retry() here because new logs may come
-                    Log.i(Const.LOG_TAG, "Failed to upload logs: retry in " + FIRE_PERIOD_RETRY_MINS + " mins");
-                    uploadScheduled = false;
-                    scheduleUpload(context, FIRE_PERIOD_RETRY_MINS);
-                    return Result.failure();
-                } else {
-                    Log.i(Const.LOG_TAG, "Logs are uploaded");
-                    // Mark items as sent and query next items
-                    LogTable.delete(DatabaseHelper.instance(context).getWritableDatabase(), unsentItems);
+
+                @Override
+                public boolean delete(List<RemoteLogItem> items) {
+                    return LogTable.delete(dbHelper.getWritableDatabase(), items);
                 }
-            }
+            }, MAX_UPLOADED_MESSAGES);
         } catch (Exception e) {
             // Oops... WTF? We need to retry!
             e.printStackTrace();
             uploadScheduled = false;
             scheduleUpload(context, FIRE_PERIOD_MINS);
             return Result.failure();
+        }
+
+        switch (outcome) {
+            case BUSY:
+                Log.i(Const.LOG_TAG, "Remote logger: another upload is running");
+                return Result.success();
+            case UPLOAD_FAILED:
+                // XXX: we do not use Result.retry() here because new logs may come
+                Log.i(Const.LOG_TAG, "Failed to upload logs: retry in " + FIRE_PERIOD_RETRY_MINS + " mins");
+                uploadScheduled = false;
+                scheduleUpload(context, FIRE_PERIOD_RETRY_MINS);
+                return Result.failure();
+            case DELETE_FAILED:
+                Log.w(Const.LOG_TAG, "Failed to delete uploaded logs: retry in " + FIRE_PERIOD_RETRY_MINS + " mins");
+                uploadScheduled = false;
+                scheduleUpload(context, FIRE_PERIOD_RETRY_MINS);
+                return Result.failure();
+            default:
+                uploadScheduled = false;
+                // A log written after the last empty select found the upload still scheduled
+                if (hasUnsentItems(dbHelper)) {
+                    scheduleUpload(context);
+                }
+                return Result.success();
+        }
+    }
+
+    private static boolean hasUnsentItems(DatabaseHelper dbHelper) {
+        try {
+            return !LogTable.select(dbHelper.getReadableDatabase(), 1).isEmpty();
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
         }
     }
 

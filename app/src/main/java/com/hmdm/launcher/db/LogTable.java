@@ -75,7 +75,8 @@ public class LogTable {
         }
     }
 
-    public static void delete(SQLiteDatabase db, List<RemoteLogItem> items) {
+    public static boolean delete(SQLiteDatabase db, List<RemoteLogItem> items) {
+        boolean deleted = false;
         db.beginTransaction();
         try {
             for (RemoteLogItem item : items) {
@@ -84,11 +85,13 @@ public class LogTable {
                 });
             }
             db.setTransactionSuccessful();
+            deleted = true;
         } catch (SQLException e) {
             e.printStackTrace();
         } finally {
             db.endTransaction();
         }
+        return deleted;
     }
 
     @SuppressLint("Range")
