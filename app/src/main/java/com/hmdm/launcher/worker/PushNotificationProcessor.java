@@ -42,6 +42,7 @@ import com.hmdm.launcher.json.Download;
 import com.hmdm.launcher.json.PushMessage;
 import com.hmdm.launcher.json.ServerConfig;
 import com.hmdm.launcher.locker24.ForceAppUpdate;
+import com.hmdm.launcher.locker24.ForcedApps;
 import com.hmdm.launcher.util.InstallUtils;
 import com.hmdm.launcher.util.LegacyUtils;
 import com.hmdm.launcher.util.RemoteLogger;
@@ -74,8 +75,17 @@ public class PushNotificationProcessor {
             ConfigUpdater.notifyConfigUpdate(context);
             // The configUpdated should be broadcasted after the configuration update is completed
             return;
-        } else if (ForceAppUpdate.handle(message,
-                userInteraction -> ConfigUpdater.forceConfigUpdate(context, null, userInteraction))) {
+        } else if (ForceAppUpdate.handle(message, System.currentTimeMillis(), new ForceAppUpdate.Starter() {
+            @Override
+            public void forced(ForcedApps apps) {
+                ConfigUpdater.forceAppUpdate(context, apps);
+            }
+
+            @Override
+            public void normal() {
+                ConfigUpdater.notifyConfigUpdate(context);
+            }
+        })) {
             return;
         } else if (message.getMessageType().equals(PushMessage.TYPE_RUN_APP)) {
             // Run application

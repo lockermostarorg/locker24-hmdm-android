@@ -18,4 +18,8 @@ public final class ConfigFlowPolicy {
     public static boolean mergeSkipLoad(boolean pending, boolean next) {
         return pending && next;
     }
+
+    public static ForcedApps mergeForced(ForcedApps pending, ForcedApps next) {
+        return ForcedApps.union(pending, next);
+    }
 }

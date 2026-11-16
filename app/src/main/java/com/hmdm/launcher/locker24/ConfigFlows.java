@@ -21,9 +21,11 @@ public final class ConfigFlows {
         final ConfigUpdater.UINotifier notifier;
         final boolean userInteraction;
         final boolean skipLoad;
+        final ForcedApps forced;
 
         Request(ConfigUpdater updater, Context context, ConfigUpdater.UINotifier notifier, boolean userInteraction,
-                boolean skipLoad) {
+                boolean skipLoad, ForcedApps forced) {
+            this.forced = forced;
             this.updater = updater;
             this.context = context;
             this.notifier = notifier;
@@ -47,7 +49,8 @@ public final class ConfigFlows {
         public Request merge(Request pending, Request next) {
             return new Request(next.updater, next.context, next.notifier,
                     ConfigFlowPolicy.mergeUserInteraction(pending.userInteraction, next.userInteraction),
-                    ConfigFlowPolicy.mergeSkipLoad(pending.skipLoad, next.skipLoad));
+                    ConfigFlowPolicy.mergeSkipLoad(pending.skipLoad, next.skipLoad),
+                    ConfigFlowPolicy.mergeForced(pending.forced, next.forced));
         }
 
         @Override
@@ -65,19 +68,20 @@ public final class ConfigFlows {
 
     /** Returns true when the caller runs its flow now, false when the request waits for the running flow. */
     public static boolean begin(ConfigUpdater updater, Context context, ConfigUpdater.UINotifier notifier,
-                                boolean userInteraction) {
-        return begin(updater, context, notifier, userInteraction, false);
+                                boolean userInteraction, ForcedApps forced) {
+        return begin(updater, context, notifier, userInteraction, false, forced);
     }
 
     /** As begin(), for a flow that continues with the stored configuration instead of loading it. */
     public static boolean beginSkippingLoad(ConfigUpdater updater, Context context,
-                                            ConfigUpdater.UINotifier notifier, boolean userInteraction) {
-        return begin(updater, context, notifier, userInteraction, true);
+                                            ConfigUpdater.UINotifier notifier, boolean userInteraction,
+                                            ForcedApps forced) {
+        return begin(updater, context, notifier, userInteraction, true, forced);
     }
 
     private static boolean begin(ConfigUpdater updater, Context context, ConfigUpdater.UINotifier notifier,
-                                 boolean userInteraction, boolean skipLoad) {
-        final Request request = new Request(updater, context, notifier, userInteraction, skipLoad);
+                                 boolean userInteraction, boolean skipLoad, ForcedApps forced) {
+        final Request request = new Request(updater, context, notifier, userInteraction, skipLoad, forced);
         ConfigFlowGate.Decision decision = GATE.request(request, SystemClock.elapsedRealtime());
         if (decision != ConfigFlowGate.Decision.COALESCE) {
             MAIN.postDelayed(() -> expire(request), ConfigFlowGate.STALE_MS);
@@ -125,11 +129,11 @@ public final class ConfigFlows {
                 log(next.context, Const.LOG_DEBUG, "Config update runs again for a request made during the previous one");
                 if (isGone(next.notifier)) {
                     Context app = next.context.getApplicationContext();
-                    new ConfigUpdater(app).updateConfig(app, null, next.userInteraction);
+                    new ConfigUpdater(app).updateConfig(app, null, next.userInteraction, next.forced);
                 } else if (next.skipLoad) {
                     next.updater.skipConfigLoad();
                 } else {
-                    next.updater.updateConfig(next.context, next.notifier, next.userInteraction);
+                    next.updater.updateConfig(next.context, next.notifier, next.userInteraction, next.forced);
                 }
             } catch (RuntimeException e) {
                 Log.w(Const.LOG_TAG, "Queued config update failed: " + e);

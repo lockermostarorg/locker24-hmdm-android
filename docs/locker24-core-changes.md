@@ -23,7 +23,7 @@ The fork is ours. Upstream bugs are fixed in core files even when the fix change
 | `worker/RemoteLogWorker.java` | `uploadScheduled` is volatile. `doWork` drains through `locker24/LogDrain`: one drain at a time (a second worker returns at once), a failed delete ends the drain, and rows written after the last empty select schedule another upload. | `scheduleUpload` uses `REPLACE` and `MainActivity.startServices` resets the scheduled flag on every resume; a replaced worker keeps running, so two workers uploaded the same rows (2-3 copies on the server). A blocking lock would tie up WorkManager threads. | **both flavors** |
 | `db/LogTable.java` | `delete` returns whether the transaction succeeded; `deleteOldItems` uses `DELETE_OLD_LOGS`. | The drain must stop when uploaded rows cannot be deleted. Old logs were never purged because the purge ran the delete-by-id statement with a timestamp. | **both flavors** |
 | `json/PushMessage.java` | Adds `TYPE_FORCE_APP_UPDATE = "forceAppUpdate"`. | The server sends it after moving configurations to a new app version with mode "immediate". | **both flavors** |
-| `worker/PushNotificationProcessor.java` | Routes `forceAppUpdate` to `locker24/ForceAppUpdate`, which runs `ConfigUpdater.forceConfigUpdate(context, null, true)`. | Installs pending app updates at once, ignoring the update window. No notifier is passed, so nothing shows UI on the kiosk. With the launcher not running, a `configUpdated` and a force push share the BACKGROUND gate key and merge into one flow with the flag (`ConfigFlowPolicy`). With `MainActivity` running, `configUpdated` runs under the activity's own key without the flag, and the force flow is queued under BACKGROUND and runs after it: a redundant config fetch, and `MainActivity` gets no completion refresh after the forced flow (same as `PluginApiService.forceConfigUpdate`). Keeping the activity UI out of the forced path is deliberate. | **both flavors** |
+| `worker/PushNotificationProcessor.java` | Routes `forceAppUpdate` to `locker24/ForceAppUpdate`: a fresh payload starts `ConfigUpdater.forceAppUpdate(context, apps)`; a stale, missing or malformed payload starts the normal `notifyConfigUpdate`. | Installs the apps named in the push at once, ignoring the update window and the Wi-Fi-only rule for those apps only. No notifier is passed, so nothing shows UI on the kiosk. `userInteraction` is not used. | **both flavors** |
 
 ## AIDL method order
 
@@ -51,17 +51,17 @@ A flow holds the process-wide gate from `ConfigFlows.begin` until `ConfigFlows.e
 | Superseded flow at a stop point | stops; it no longer owns the gate |
 | Stall of any kind | released by the expiry 10 min after `begin`, then the next queued request runs; a later request also takes over a stale flow or one whose launcher instance is destroyed |
 
-## What `userInteraction = true` changes
+## What `forceAppUpdate` changes
 
-The `forceAppUpdate` push runs the update with `userInteraction = true` and no notifier. Everything the flag changes in `ConfigUpdater`:
+Push payload: `{"apps":[{"pkg":"...","version":"..."}],"issuedAt":<epoch ms>}`. `ForcedApps.parse` returns an empty set (and the agent runs a normal `configUpdated` flow) when the payload is missing, malformed, has no valid app entry, or `issuedAt` is older than 60 minutes by the device clock; a device clock before 2020 counts the payload as fresh.
 
-| Place | Effect with `true` | Judgement for a kiosk |
-|---|---|---|
-| `loadAndInstallApplications` | Ignores the update window (`checkAppUpdateTimeRestriction`). | The purpose of the push. |
-| `loadAndInstallApplications`, `loadAndInstallFiles` | Ignores the Wi-Fi-only restriction (`checkUpdateNetworkRestriction`). | Harmless: kiosks are on Wi-Fi; on mobile data the one-off download is what the operator asked for. |
-| `canDownload` | Ignores the previous-install-failure skip and the limited-download rule, so a failed APK is retried. | Harmless: one retry per push, bounded by the gate; the push only follows a new version. |
-| Config fetch, network error with no retries left | Ends the flow (`lockBackOnFailure`, `ConfigFlows.end`) instead of continuing with the stored configuration. | Harmless: with no connection nothing can be downloaded; the next configUpdated or periodic update continues normally. |
-| Same place, with a notifier | Shows the network error dialog. | Not reachable: this push passes no notifier. |
-| `checkServerMigration` success | Re-runs with `userInteraction = false`. | Not affected. |
+The set travels with the request through `ConfigUpdater.updateConfig(..., forcedApps)` and `ConfigFlows`; the gate merges requests by union (a plain `configUpdated` merges in an empty set). `userInteraction` stays `false`, so none of its side effects apply (back-off on failed installs, network-error dialog and flow end, file Wi-Fi rule).
 
-All 21 `uiNotifier` call sites are guarded by `uiNotifier != null`, so a null notifier is safe (it is what `notifyConfigUpdate` passes when the launcher is not running). With a null notifier the "run after install" apps start at once after install, as in any background update. `forceConfigUpdate` is used instead of the launcher broadcast so a running `MainActivity` does not show its progress UI.
+| Place | Behaviour |
+|---|---|
+| `loadAndInstallApplications` | Per app, `ForcedApps.mayRun`: an app installs now when the window and Wi-Fi rules pass, or when it is not a removal and its package and configured version (from the freshly fetched configuration) match an entry. Every other install, update or removal waits for the window and Wi-Fi exactly as before. The first runnable app is moved to the head of the list; if none is runnable the step ends as before. |
+| Agent self-update | Goes through the same list, so it is forced only when the agent's own package and version are in the set. |
+| `loadAndInstallFiles` | Unchanged: files obey the Wi-Fi rule. |
+| `canDownload` | Unchanged. |
+
+With the launcher not running, `configUpdated` and the force push share the BACKGROUND gate key and merge into one flow. With `MainActivity` running, `configUpdated` runs under the activity's key and the force flow is queued under BACKGROUND and runs after it (a redundant config fetch, and no completion refresh of `MainActivity`, as with `PluginApiService.forceConfigUpdate`).

@@ -31,6 +31,7 @@ import com.hmdm.launcher.json.PushMessage;
 import com.hmdm.launcher.json.RemoteFile;
 import com.hmdm.launcher.json.ServerConfig;
 import com.hmdm.launcher.locker24.ConfigFlows;
+import com.hmdm.launcher.locker24.ForcedApps;
 import com.hmdm.launcher.pro.worker.DetailedInfoWorker;
 import com.hmdm.launcher.server.ServerServiceKeeper;
 import com.hmdm.launcher.service.PushLongPollingService;
@@ -97,6 +98,7 @@ public class ConfigUpdater {
     private int retryDelay;
     private boolean loadOnly = false;
     private boolean userInteraction;
+    private ForcedApps forcedApps = ForcedApps.EMPTY;
 
     public List<Application> getApplicationsForRun() {
         return applicationsForRun;
@@ -111,6 +113,10 @@ public class ConfigUpdater {
             Log.d(Const.LOG_TAG, "Main activity is not running, creating a new ConfigUpdater");
             new ConfigUpdater(context).updateConfig(context, null, false);
         }
+    }
+
+    public static void forceAppUpdate(final Context context, final ForcedApps apps) {
+        new ConfigUpdater(context).updateConfig(context, null, false, apps);
     }
 
     public static void forceConfigUpdate(final Context context) {
@@ -131,9 +137,15 @@ public class ConfigUpdater {
     }
 
     public void updateConfig(final Context context, final UINotifier uiNotifier, final boolean userInteraction) {
-        if (!ConfigFlows.begin(this, context, uiNotifier, userInteraction)) {
+        updateConfig(context, uiNotifier, userInteraction, ForcedApps.EMPTY);
+    }
+
+    public void updateConfig(final Context context, final UINotifier uiNotifier, final boolean userInteraction,
+                             final ForcedApps forcedApps) {
+        if (!ConfigFlows.begin(this, context, uiNotifier, userInteraction, forcedApps)) {
             return;
         }
+        this.forcedApps = forcedApps;
         runConfigUpdate(context, uiNotifier, userInteraction);
     }
 
@@ -222,7 +234,7 @@ public class ConfigUpdater {
     }
 
     public void skipConfigLoad() {
-        if (!ConfigFlows.beginSkippingLoad(this, context, uiNotifier, userInteraction)) {
+        if (!ConfigFlows.beginSkippingLoad(this, context, uiNotifier, userInteraction, forcedApps)) {
             return;
         }
         updateRemoteLogConfig();
@@ -806,14 +818,28 @@ public class ConfigUpdater {
             return;
         }
         boolean isGoodTimeForAppUpdate = userInteraction || checkAppUpdateTimeRestriction(settingsHelper.getConfig());
-        if (applicationsForInstall.size() > 0 && !isGoodTimeForAppUpdate) {
-            RemoteLogger.log(context, Const.LOG_DEBUG, "Application update not enabled. Scheduled time: " + settingsHelper.getConfig().getAppUpdateFrom());
-        }
         boolean isGoodNetworkForUpdate = userInteraction || checkUpdateNetworkRestriction(settingsHelper.getConfig(), context);
-        if (applicationsForInstall.size() > 0 && !isGoodNetworkForUpdate) {
-            RemoteLogger.log(context, Const.LOG_DEBUG, "Application update not enabled: waiting for WiFi connection");
+        int nextIndex = -1;
+        for (int i = 0; i < applicationsForInstall.size(); i++) {
+            Application candidate = applicationsForInstall.get(i);
+            if (ForcedApps.mayRun(forcedApps, candidate.getPkg(), candidate.getVersion(), candidate.isRemove(),
+                    isGoodTimeForAppUpdate, isGoodNetworkForUpdate)) {
+                nextIndex = i;
+                break;
+            }
         }
-        if (applicationsForInstall.size() > 0 && isGoodTimeForAppUpdate && isGoodNetworkForUpdate) {
+        if (applicationsForInstall.size() > 0 && nextIndex < 0) {
+            if (!isGoodTimeForAppUpdate) {
+                RemoteLogger.log(context, Const.LOG_DEBUG, "Application update not enabled. Scheduled time: " + settingsHelper.getConfig().getAppUpdateFrom());
+            }
+            if (!isGoodNetworkForUpdate) {
+                RemoteLogger.log(context, Const.LOG_DEBUG, "Application update not enabled: waiting for WiFi connection");
+            }
+        }
+        if (nextIndex >= 0) {
+            if (nextIndex > 0) {
+                applicationsForInstall.add(0, applicationsForInstall.remove(nextIndex));
+            }
             Application application = applicationsForInstall.remove(0);
 
             new AsyncTask<Application, Void, ApplicationStatus>() {

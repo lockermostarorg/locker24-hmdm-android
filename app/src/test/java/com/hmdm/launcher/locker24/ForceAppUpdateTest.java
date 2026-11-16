@@ -14,15 +14,17 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class ForceAppUpdateTest {
+    private static final long NOW = 1_800_000_000_000L;
+
     private static final class Req {
         final Object flow;
         final Object notifier;
-        final boolean userInteraction;
+        final ForcedApps forced;
 
-        Req(Object flow, Object notifier, boolean userInteraction) {
+        Req(Object flow, Object notifier, ForcedApps forced) {
             this.flow = flow;
             this.notifier = notifier;
-            this.userInteraction = userInteraction;
+            this.forced = forced;
         }
     }
 
@@ -40,8 +42,7 @@ public class ForceAppUpdateTest {
 
             @Override
             public Req merge(Req pending, Req next) {
-                return new Req(next.flow, next.notifier,
-                        ConfigFlowPolicy.mergeUserInteraction(pending.userInteraction, next.userInteraction));
+                return new Req(next.flow, next.notifier, ConfigFlowPolicy.mergeForced(pending.forced, next.forced));
             }
 
             @Override
@@ -49,6 +50,32 @@ public class ForceAppUpdateTest {
                 return false;
             }
         });
+    }
+
+    private static PushMessage message(String type, String payload) {
+        PushMessage message = new PushMessage();
+        message.setMessageType(type);
+        message.setPayload(payload);
+        return message;
+    }
+
+    private static String payload(String pkg, String version, long issuedAt) {
+        return "{\"apps\":[{\"pkg\":\"" + pkg + "\",\"version\":\"" + version + "\"}],\"issuedAt\":" + issuedAt + "}";
+    }
+
+    private static final class Recorder implements ForceAppUpdate.Starter {
+        final List<ForcedApps> forced = new ArrayList<>();
+        int normal;
+
+        @Override
+        public void forced(ForcedApps apps) {
+            forced.add(apps);
+        }
+
+        @Override
+        public void normal() {
+            normal++;
+        }
     }
 
     @Test public void nullNotifierUsesTheBackgroundKeyAndOthersTheirOwn() {
@@ -65,69 +92,79 @@ public class ForceAppUpdateTest {
         assertFalse(ConfigFlowPolicy.mergeSkipLoad(true, false));
     }
 
-    @Test public void forceRunsAsASeparateFlowAfterAMainActivityFlowWithoutTheFlag() {
-        ConfigFlowGate<Req> gate = gate();
-        Object activity = new Object();
-        Object updater = new Object();
-        Object forceUpdater = new Object();
-        assertEquals(ConfigFlowGate.Decision.START, gate.request(new Req(updater, activity, false), 1_000));
-        assertEquals(ConfigFlowGate.Decision.COALESCE, gate.request(new Req(forceUpdater, null, true), 1_001));
-        Req next = gate.finish(updater);
-        assertSame(forceUpdater, next.flow);
-        assertTrue(next.userInteraction);
-    }
-
-    private static PushMessage message(String type) {
-        PushMessage message = new PushMessage();
-        message.setMessageType(type);
-        return message;
-    }
-
     @Test public void typeIsSpelledAsTheServerSendsIt() {
         assertEquals("forceAppUpdate", PushMessage.TYPE_FORCE_APP_UPDATE);
     }
 
-    @Test public void forcePushStartsUserInteractionUpdate() {
-        List<Boolean> started = new ArrayList<>();
-        assertTrue(ForceAppUpdate.handle(message("forceAppUpdate"), started::add));
-        assertEquals(1, started.size());
-        assertTrue(started.get(0));
+    @Test public void freshForcePushStartsAForcedUpdateWithTheNamedApps() {
+        Recorder recorder = new Recorder();
+        assertTrue(ForceAppUpdate.handle(message("forceAppUpdate", payload("kiosk", "2.1.0", NOW - 1000)), NOW, recorder));
+        assertEquals(1, recorder.forced.size());
+        assertEquals(0, recorder.normal);
+        assertTrue(recorder.forced.get(0).matches("kiosk", "2.1.0"));
+    }
+
+    @Test public void stalePushStartsANormalUpdate() {
+        Recorder recorder = new Recorder();
+        assertTrue(ForceAppUpdate.handle(
+                message("forceAppUpdate", payload("kiosk", "2.1.0", NOW - 61 * 60_000L)), NOW, recorder));
+        assertTrue(recorder.forced.isEmpty());
+        assertEquals(1, recorder.normal);
+    }
+
+    @Test public void malformedPushStartsANormalUpdate() {
+        Recorder recorder = new Recorder();
+        assertTrue(ForceAppUpdate.handle(message("forceAppUpdate", "oops"), NOW, recorder));
+        assertTrue(ForceAppUpdate.handle(message("forceAppUpdate", null), NOW, recorder));
+        assertTrue(recorder.forced.isEmpty());
+        assertEquals(2, recorder.normal);
     }
 
     @Test public void otherPushTypesAreNotHandled() {
-        List<Boolean> started = new ArrayList<>();
-        assertFalse(ForceAppUpdate.handle(message(PushMessage.TYPE_CONFIG_UPDATED), started::add));
-        assertFalse(ForceAppUpdate.handle(message("reboot"), started::add));
-        assertTrue(started.isEmpty());
+        Recorder recorder = new Recorder();
+        assertFalse(ForceAppUpdate.handle(message(PushMessage.TYPE_CONFIG_UPDATED, null), NOW, recorder));
+        assertFalse(ForceAppUpdate.handle(message("reboot", null), NOW, recorder));
+        assertTrue(recorder.forced.isEmpty());
+        assertEquals(0, recorder.normal);
     }
 
-    @Test public void configUpdatedThenForceUnderTheBackgroundKeyMergesToOneFlowWithTheFlag() {
+    @Test public void configUpdatedThenForceMergeToOneFlowWithTheForcedApps() {
         ConfigFlowGate<Req> gate = gate();
         Object flow = new Object();
-        gate.request(new Req(flow, null, false), 1_000);
-        gate.request(new Req(flow, null, false), 1_001);
-        gate.request(new Req(flow, null, true), 1_002);
+        gate.request(new Req(flow, null, ForcedApps.EMPTY), 1_000);
+        gate.request(new Req(flow, null, ForcedApps.EMPTY), 1_001);
+        gate.request(new Req(flow, null, ForcedApps.of("kiosk", "2.1.0")), 1_002);
+        gate.request(new Req(flow, null, ForcedApps.EMPTY), 1_003);
         Req rerun = gate.finish(flow);
-        assertTrue(rerun.userInteraction);
+        assertTrue(rerun.forced.matches("kiosk", "2.1.0"));
+        assertEquals(1, rerun.forced.size());
         assertEquals(ConfigFlowGate.Decision.START, gate.request(rerun, 1_010));
         assertNull(gate.finish(flow));
     }
 
-    @Test public void burstOfForcePushesCoalesces() {
+    @Test public void forcePushesUnionTheirAppsInOneFlow() {
         ConfigFlowGate<Req> gate = gate();
         Object flow = new Object();
-        List<Req> requests = new ArrayList<>();
-        ForceAppUpdate.Starter starter = ui -> requests.add(new Req(flow, null, ui));
-        for (int i = 0; i < 3; i++) {
-            ForceAppUpdate.handle(message("forceAppUpdate"), starter);
-        }
-        assertEquals(ConfigFlowGate.Decision.START, gate.request(requests.get(0), 1_000));
-        assertEquals(ConfigFlowGate.Decision.COALESCE, gate.request(requests.get(1), 1_001));
-        assertEquals(ConfigFlowGate.Decision.COALESCE, gate.request(requests.get(2), 1_002));
-
+        gate.request(new Req(flow, null, ForcedApps.EMPTY), 1_000);
+        gate.request(new Req(flow, null, ForcedApps.of("kiosk", "2.1.0")), 1_001);
+        gate.request(new Req(flow, null, ForcedApps.of("agent", "6.40-l24.6")), 1_002);
+        gate.request(new Req(flow, null, ForcedApps.of("kiosk", "2.1.0")), 1_003);
         Req rerun = gate.finish(flow);
-        assertTrue(rerun.userInteraction);
-        assertEquals(ConfigFlowGate.Decision.START, gate.request(rerun, 1_010));
-        assertNull(gate.finish(flow));
+        assertEquals(2, rerun.forced.size());
+        assertTrue(rerun.forced.matches("agent", "6.40-l24.6"));
+        assertNull(gate.finish(new Object()));
+    }
+
+    @Test public void forceRunsAsASeparateFlowAfterAMainActivityFlow() {
+        ConfigFlowGate<Req> gate = gate();
+        Object activity = new Object();
+        Object updater = new Object();
+        Object forceUpdater = new Object();
+        assertEquals(ConfigFlowGate.Decision.START, gate.request(new Req(updater, activity, ForcedApps.EMPTY), 1_000));
+        assertEquals(ConfigFlowGate.Decision.COALESCE,
+                gate.request(new Req(forceUpdater, null, ForcedApps.of("kiosk", "2.1.0")), 1_001));
+        Req next = gate.finish(updater);
+        assertSame(forceUpdater, next.flow);
+        assertTrue(next.forced.matches("kiosk", "2.1.0"));
     }
 }
