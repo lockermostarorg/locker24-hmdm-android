@@ -821,6 +821,20 @@ public class Utils {
             activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
         }
         Log.i(Const.LOG_TAG, "Set orientation: " + loggedOrientation);
+        RemoteLogger.log(activity, Const.LOG_DEBUG, "Set orientation: " + loggedOrientation + " (" + orientationDiag(activity) + ")");
+    }
+
+    public static String orientationDiag(Context context) {
+        try {
+            int cfg = context.getResources().getConfiguration().orientation;
+            android.hardware.display.DisplayManager dm = (android.hardware.display.DisplayManager) context.getSystemService(Context.DISPLAY_SERVICE);
+            int rotation = dm != null ? dm.getDisplay(android.view.Display.DEFAULT_DISPLAY).getRotation() : -1;
+            return "config=" + (cfg == android.content.res.Configuration.ORIENTATION_PORTRAIT ? "portrait"
+                    : cfg == android.content.res.Configuration.ORIENTATION_LANDSCAPE ? "landscape" : String.valueOf(cfg))
+                    + ", rotation=" + rotation;
+        } catch (Throwable e) {
+            return "diag failed: " + e;
+        }
     }
 
     public static boolean isLauncherIntent(Intent intent) {

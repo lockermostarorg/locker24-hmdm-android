@@ -361,6 +361,8 @@ public class MainActivity
         Intent intent = getIntent();
         Log.d(Const.LOG_TAG, "MainActivity started" + (intent != null && intent.getAction() != null ?
                 ", action: " + intent.getAction() : ""));
+        RemoteLogger.log(this, Const.LOG_DEBUG, "MainActivity onCreate: requested=" + getRequestedOrientation()
+                + ", restored=" + (savedInstanceState != null) + ", " + Utils.orientationDiag(this));
         if (intent != null && "android.app.action.PROVISIONING_SUCCESSFUL".equalsIgnoreCase(intent.getAction())) {
             firstStartAfterProvisioning = true;
         }
@@ -612,6 +614,7 @@ public class MainActivity
         int orientation = getResources().getConfiguration().orientation;
         int rotation = getWindowManager().getDefaultDisplay().getRotation();
         Log.d(Const.LOG_TAG, "Lock orientation: orientation=" + orientation + ", rotation=" + rotation);
+        RemoteLogger.log(this, Const.LOG_DEBUG, "Lock orientation: orientation=" + orientation + ", rotation=" + rotation);
         if (orientation == Configuration.ORIENTATION_PORTRAIT) {
             setRequestedOrientation(rotation < Surface.ROTATION_180 ? ActivityInfo.SCREEN_ORIENTATION_PORTRAIT : ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT);
         } else {

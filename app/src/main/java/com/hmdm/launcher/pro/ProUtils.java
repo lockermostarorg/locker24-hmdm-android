@@ -227,9 +227,12 @@ public class ProUtils {
                 Log.w(Const.LOG_TAG, "setStatusBarDisabled returned false");
                 RemoteLogger.log(activity, Const.LOG_WARN, "setStatusBarDisabled returned false");
             }
-            if (!isKioskModeRunning(activity)) {
+            boolean kioskRunning = isKioskModeRunning(activity);
+            if (!kioskRunning) {
                 intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK);
             }
+            RemoteLogger.log(activity, Const.LOG_DEBUG, "Kiosk start " + kioskApp + ": lockTaskRunning=" + kioskRunning
+                    + ", clearTask=" + !kioskRunning + ", " + Utils.orientationDiag(activity));
             KioskState.setAdminUnlocked(activity, false);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 activity.startActivity(intent, ActivityOptions.makeBasic().setLockTaskEnabled(true).toBundle());
@@ -245,6 +248,9 @@ public class ProUtils {
                     RemoteLogger.log(appContext, Const.LOG_WARN, "Lock task not engaged after kiosk start");
                 }
             }, 1000);
+            new Handler(Looper.getMainLooper()).postDelayed(() ->
+                    RemoteLogger.log(appContext, Const.LOG_DEBUG, "Kiosk start +5s: lockTaskRunning="
+                            + isKioskModeRunning(appContext) + ", " + Utils.orientationDiag(appContext)), 5000);
             return true;
         } catch (RuntimeException e) {
             logError(activity, "startCosuKioskMode failed", e);
