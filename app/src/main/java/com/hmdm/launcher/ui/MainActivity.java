@@ -442,6 +442,13 @@ public class MainActivity
         }
 
         Initializer.init(this, () -> {
+            // A recreated instance may be destroyed by now: receivers registered here would never be
+            // unregistered and would run a second configuration update on every push
+            if (isDestroyed()) {
+                RemoteLogger.log(MainActivity.this, Const.LOG_DEBUG,
+                        "MainActivity initialized after it was destroyed, skipping its start-up");
+                return;
+            }
 
             // Try to start services in onCreate(), this may fail, we will try again on each onResume.
             startServicesWithRetry();
