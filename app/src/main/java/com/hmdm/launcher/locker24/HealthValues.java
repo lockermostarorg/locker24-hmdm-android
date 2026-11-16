@@ -3,12 +3,16 @@ package com.hmdm.launcher.locker24;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Bundle;
+import android.text.TextUtils;
+import android.util.Log;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.hmdm.launcher.Const;
 import com.hmdm.launcher.helper.SettingsHelper;
 import com.hmdm.launcher.json.ServerConfig;
+import com.hmdm.launcher.util.RemoteLogger;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -17,6 +21,9 @@ public final class HealthValues {
     private static final String PREFS = "locker24_health";
     private static final String KEY_VALUES = "app_values";
     private static final String KEY_PUBLISHED_AT = "app_published_at";
+    private static final String KEY_PACKAGE = "app_values_pkg";
+    private static final long LOG_INTERVAL_MS = 60_000L;
+    private static final Map<String, Long> LAST_LOGGED = new HashMap<>();
 
     private static final String[] KEYS = {
             "locker_short_uid", "last_api_ok_at", "last_api_error_at", "last_api_error", "app_errors_24h"
@@ -66,10 +73,14 @@ public final class HealthValues {
             if (values == null) {
                 return false;
             }
-            ServerConfig config = SettingsHelper.getInstance(context).getConfig();
-            String mainApp = config == null ? null : config.getMainApp();
+            String mainApp = mainApp(context);
+            if (mainApp == null) {
+                reject(context, "no config", null);
+                return false;
+            }
             String[] packages = context.getPackageManager().getPackagesForUid(callingUid);
             if (!isAllowedCaller(packages, mainApp)) {
+                reject(context, "caller not allowed", packages == null ? "none" : TextUtils.join(",", packages));
                 return false;
             }
             Map<String, Object> raw = new HashMap<>();
@@ -78,6 +89,7 @@ public final class HealthValues {
             }
             Map<String, Object> clean = sanitize(raw);
             if (clean.isEmpty()) {
+                reject(context, "empty after sanitizing", null);
                 return false;
             }
             ObjectNode node = MAPPER.createObjectNode();
@@ -93,41 +105,40 @@ public final class HealthValues {
             }
             return prefs(context).edit()
                     .putString(KEY_VALUES, MAPPER.writeValueAsString(node))
+                    .putString(KEY_PACKAGE, mainApp)
                     .putLong(KEY_PUBLISHED_AT, System.currentTimeMillis())
                     .commit();
         } catch (Exception e) {
+            reject(context, "exception", e.getClass().getSimpleName());
             return false;
         }
     }
 
-    public static Map<String, Object> latest(Context context) {
-        try {
-            String json = prefs(context).getString(KEY_VALUES, null);
-            if (json == null) {
-                return null;
+    private static Map<String, Object> parse(String json) throws java.io.IOException {
+        JsonNode node = MAPPER.readTree(json);
+        Map<String, Object> raw = new HashMap<>();
+        for (String key : KEYS) {
+            JsonNode v = node.get(key);
+            if (v == null || v.isNull()) {
+                continue;
             }
-            JsonNode node = MAPPER.readTree(json);
-            Map<String, Object> raw = new HashMap<>();
-            for (String key : KEYS) {
-                JsonNode v = node.get(key);
-                if (v == null || v.isNull()) {
-                    continue;
-                }
-                if (v.isTextual()) {
-                    raw.put(key, v.asText());
-                } else if (v.isIntegralNumber()) {
-                    raw.put(key, v.asLong());
-                }
+            if (v.isTextual()) {
+                raw.put(key, v.asText());
+            } else if (v.isIntegralNumber()) {
+                raw.put(key, v.asLong());
             }
-            return sanitize(raw);
-        } catch (Exception e) {
-            return null;
         }
+        return sanitize(raw);
+    }
+
+    public static Map<String, Object> latest(Context context) {
+        Snapshot s = snapshot(context);
+        return s == null ? null : s.values;
     }
 
     public static Long publishedAt(Context context) {
-        SharedPreferences p = prefs(context);
-        return p.contains(KEY_PUBLISHED_AT) ? p.getLong(KEY_PUBLISHED_AT, 0L) : null;
+        Snapshot s = snapshot(context);
+        return s == null ? null : s.publishedAt;
     }
 
     private static SharedPreferences prefs(Context context) {
@@ -138,14 +149,83 @@ public final class HealthValues {
         Object v = raw.get(key);
         if (v instanceof String) {
             String s = (String) v;
-            out.put(key, s.length() > max ? s.substring(0, max) : s);
+            out.put(key, truncate(s, max));
         }
     }
 
     private static void putLong(Map<String, Object> out, Map<String, Object> raw, String key) {
         Object v = raw.get(key);
         if (v instanceof Integer || v instanceof Long) {
-            out.put(key, ((Number) v).longValue());
+            long n = ((Number) v).longValue();
+            if (n > 0) {
+                out.put(key, n);
+            }
+        }
+    }
+
+    static String truncate(String s, int max) {
+        if (s.length() <= max) {
+            return s;
+        }
+        int end = max;
+        if (Character.isHighSurrogate(s.charAt(end - 1))) {
+            end--;
+        }
+        return s.substring(0, end);
+    }
+
+    public static boolean isCurrent(String storedPackage, String mainApp) {
+        return storedPackage != null && storedPackage.equals(mainApp);
+    }
+
+    static boolean shouldLog(Map<String, Long> last, String reason, long now) {
+        Long prev = last.get(reason);
+        if (prev != null && now - prev < LOG_INTERVAL_MS && now >= prev) {
+            return false;
+        }
+        last.put(reason, now);
+        return true;
+    }
+
+    private static void reject(Context context, String reason, String detail) {
+        boolean log;
+        synchronized (LAST_LOGGED) {
+            log = shouldLog(LAST_LOGGED, reason, System.currentTimeMillis());
+        }
+        if (!log) {
+            return;
+        }
+        String message = "publishHealth rejected: " + reason + (detail == null ? "" : " (" + detail + ")");
+        Log.w(Const.LOG_TAG, message);
+        RemoteLogger.log(context, Const.LOG_WARN, message);
+    }
+
+    private static String mainApp(Context context) {
+        ServerConfig config = SettingsHelper.getInstance(context).getConfig();
+        return config == null ? null : config.getMainApp();
+    }
+
+    public static final class Snapshot {
+        public final Map<String, Object> values;
+        public final Long publishedAt;
+
+        Snapshot(Map<String, Object> values, Long publishedAt) {
+            this.values = values;
+            this.publishedAt = publishedAt;
+        }
+    }
+
+    public static Snapshot snapshot(Context context) {
+        try {
+            SharedPreferences p = prefs(context);
+            String json = p.getString(KEY_VALUES, null);
+            if (json == null || !isCurrent(p.getString(KEY_PACKAGE, null), mainApp(context))) {
+                return null;
+            }
+            Long at = p.contains(KEY_PUBLISHED_AT) ? p.getLong(KEY_PUBLISHED_AT, 0L) : null;
+            return new Snapshot(parse(json), at);
+        } catch (Exception e) {
+            return null;
         }
     }
 }

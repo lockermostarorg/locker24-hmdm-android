@@ -78,4 +78,39 @@ public class HealthValuesTest {
         assertTrue(HealthValues.sanitize(null).isEmpty());
         assertNull(HealthValues.sanitize(new HashMap<String, Object>()).get("foo"));
     }
+
+    @Test
+    public void truncationDoesNotLeaveLoneHighSurrogate() {
+        String s = repeat('a', 63) + "\uD83D\uDE00" + "tail";
+        Map<String, Object> raw = new HashMap<>();
+        raw.put("locker_short_uid", s);
+        String out = (String) HealthValues.sanitize(raw).get("locker_short_uid");
+        assertEquals(63, out.length());
+        assertFalse(Character.isHighSurrogate(out.charAt(out.length() - 1)));
+    }
+
+    @Test
+    public void nonPositiveTimestampsAreDropped() {
+        Map<String, Object> raw = new HashMap<>();
+        raw.put("last_api_ok_at", 0L);
+        raw.put("last_api_error_at", -5);
+        assertTrue(HealthValues.sanitize(raw).isEmpty());
+    }
+
+    @Test
+    public void valuesBelongToTheConfiguredKioskApp() {
+        assertTrue(HealthValues.isCurrent("a.b", "a.b"));
+        assertFalse(HealthValues.isCurrent("a.b", "c.d"));
+        assertFalse(HealthValues.isCurrent(null, "a.b"));
+        assertFalse(HealthValues.isCurrent("a.b", null));
+    }
+
+    @Test
+    public void rejectionLogIsRateLimitedPerReason() {
+        Map<String, Long> last = new HashMap<>();
+        assertTrue(HealthValues.shouldLog(last, "x", 1000L));
+        assertFalse(HealthValues.shouldLog(last, "x", 30_000L));
+        assertTrue(HealthValues.shouldLog(last, "y", 30_000L));
+        assertTrue(HealthValues.shouldLog(last, "x", 61_000L));
+    }
 }
