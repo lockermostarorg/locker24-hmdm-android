@@ -10,6 +10,10 @@ public class BootWatchdogReceiver extends BroadcastReceiver {
         if (intent == null || !Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) {
             return;
         }
+        try {
+            KioskState.markCurrentKioskUpdateHandled(context);
+        } catch (Throwable ignored) {
+        }
         KioskWatchdogService.start(context, null);
     }
 }
