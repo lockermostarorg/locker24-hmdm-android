@@ -271,12 +271,17 @@ public class ProUtils {
             long handledUpdate = updateTracking ? KioskState.getHandledKioskUpdateTime(activity) : 0;
             long nowWall = System.currentTimeMillis();
             KioskStartPolicy.Decision decision = KioskStartPolicy.decide(updateTracking, lastUpdateTime,
-                    handledUpdate, kioskRunning, nowWall);
+                    handledUpdate, kioskRunning, nowWall, KioskState.getLastFreshStartAt(),
+                    SystemClock.elapsedRealtime());
             if (decision.clearTask) {
                 intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK);
             }
             RemoteLogger.log(activity, Const.LOG_DEBUG, "Kiosk start " + kioskApp + ": lockTaskRunning=" + kioskRunning
                     + ", clearTask=" + decision.clearTask + ", " + Utils.orientationDiag(activity));
+            if (decision.joinsFreshStart) {
+                RemoteLogger.log(activity, Const.LOG_INFO, "Kiosk start " + kioskApp + ": a fresh start is under way, "
+                        + "bringing it forward without clearing the task");
+            }
             if (decision.forcedByUpdate) {
                 RemoteLogger.log(activity, Const.LOG_INFO, "Kiosk start " + kioskApp + " forced fresh: app updated "
                         + ((nowWall - lastUpdateTime) / 1000) + " s ago");

@@ -23,11 +23,17 @@ public final class KioskStartPolicy {
         public final boolean clearTask;
         public final boolean forcedByUpdate;
         public final long newHandled;
+        public final boolean joinsFreshStart;
 
         Decision(boolean clearTask, boolean forcedByUpdate, long newHandled) {
+            this(clearTask, forcedByUpdate, newHandled, false);
+        }
+
+        Decision(boolean clearTask, boolean forcedByUpdate, long newHandled, boolean joinsFreshStart) {
             this.clearTask = clearTask;
             this.forcedByUpdate = forcedByUpdate;
             this.newHandled = newHandled;
+            this.joinsFreshStart = joinsFreshStart;
         }
     }
 
@@ -46,6 +52,21 @@ public final class KioskStartPolicy {
             return new Decision(upstreamClear, false, lastUpdateTime);
         }
         return new Decision(true, true, lastUpdateTime);
+    }
+
+    /**
+     * As decide(), and a start that is not forced while lock task is gone right after a fresh start
+     * or retry keeps the task: that task is the fresh start still coming up, not a dead one, and
+     * clearing it would cold-start the app a second time.
+     */
+    public static Decision decide(boolean updateTracking, long lastUpdateTime, long handledUpdate,
+                                  boolean lockTaskRunning, long nowWall, long lastFreshStartAt, long nowElapsed) {
+        Decision decision = decide(updateTracking, lastUpdateTime, handledUpdate, lockTaskRunning, nowWall);
+        if (updateTracking && !decision.forcedByUpdate && !lockTaskRunning
+                && freshStartRecent(lastFreshStartAt, nowElapsed)) {
+            return new Decision(false, false, decision.newHandled, true);
+        }
+        return decision;
     }
 
     static boolean withinUpdateWindow(long lastUpdateTime, long nowWall) {

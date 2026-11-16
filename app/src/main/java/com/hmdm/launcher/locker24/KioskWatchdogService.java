@@ -81,6 +81,7 @@ public class KioskWatchdogService extends Service {
                             + (handled ? ", update handled" : ""));
                     return;
                 }
+                // Past this point only the watchdog tick (30-60 s) relaunches if that fresh start fails
                 if (KioskStartPolicy.freshStartRecent(KioskState.getLastFreshStartAt(),
                         android.os.SystemClock.elapsedRealtime())) {
                     safeLog(Const.LOG_INFO, "Kiosk app replace recheck: lock task gone, but a fresh start is "

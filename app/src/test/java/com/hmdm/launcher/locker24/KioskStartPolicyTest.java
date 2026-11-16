@@ -270,13 +270,87 @@ public class KioskStartPolicyTest {
                 KioskStartPolicy.onKioskAppReplaced(false, 20_000, 10_000));
     }
 
-    @Test public void updateFlowAtTheLauncherThenPackageBroadcastStartsTheAppOnce() {
-        long freshStartAt = 50_000;
-        long broadcastAt = freshStartAt + 1_000;
-        assertEquals(KioskStartPolicy.ReplaceAction.RECHECK_FRESH_START,
-                KioskStartPolicy.onKioskAppReplaced(false, freshStartAt, broadcastAt));
-        long retryAt = freshStartAt + KioskStartPolicy.RETRY_CHECK_MS;
-        long recheckAt = broadcastAt + 6_000;
-        assertTrue(KioskStartPolicy.freshStartRecent(retryAt, recheckAt));
+    /** The launcher and the package receiver around one kiosk app update; counts cold starts. */
+    private static final class UpdateRun {
+        static final long ELAPSED_OFFSET = 500_000;
+        final Device device = new Device(OLD_UPDATE, OLD_UPDATE);
+        long lastFreshStartAt;
+        int coldStarts;
+        int joinedStarts;
+        int relaunches;
+
+        long elapsed(long wall) {
+            return wall - T0 + ELAPSED_OFFSET;
+        }
+
+        void launcherStartsKiosk(boolean lockTaskRunning, long wall) {
+            KioskStartPolicy.Decision d = KioskStartPolicy.decide(device.tracking, device.lastUpdateTime,
+                    device.handled, lockTaskRunning, wall, lastFreshStartAt, elapsed(wall));
+            device.handled = d.newHandled;
+            if (d.forcedByUpdate) {
+                lastFreshStartAt = elapsed(wall);
+            }
+            if (d.clearTask) {
+                coldStarts++;
+            }
+            if (d.joinsFreshStart) {
+                joinedStarts++;
+            }
+        }
+
+        void packageBroadcast(boolean lockTaskRunning, long wall) {
+            if (KioskStartPolicy.onKioskAppReplaced(lockTaskRunning, lastFreshStartAt, elapsed(wall))
+                    == KioskStartPolicy.ReplaceAction.RELAUNCH) {
+                relaunches++;
+                launcherStartsKiosk(false, wall + 300);
+            }
+        }
+    }
+
+    @Test public void launcherStartFirstThenPackageBroadcastStartsTheAppOnce() {
+        UpdateRun run = new UpdateRun();
+        run.device.lastUpdateTime = T0;
+        run.launcherStartsKiosk(false, T0 + 500);
+        run.packageBroadcast(false, T0 + 1_500);
+        run.launcherStartsKiosk(false, T0 + 2_000);
+        assertEquals(0, run.relaunches);
+        assertEquals(1, run.coldStarts);
+        assertEquals(1, run.joinedStarts);
+    }
+
+    @Test public void packageBroadcastFirstThenLauncherStartStartsTheAppOnce() {
+        UpdateRun run = new UpdateRun();
+        run.device.lastUpdateTime = T0;
+        run.packageBroadcast(false, T0 + 200);
+        run.launcherStartsKiosk(false, T0 + 1_500);
+        assertEquals(1, run.relaunches);
+        assertEquals(1, run.coldStarts);
+        assertEquals(1, run.joinedStarts);
+    }
+
+    @Test public void startWithLockGoneLongAfterAFreshStartClearsTheTask() {
+        KioskStartPolicy.Decision d = KioskStartPolicy.decide(true, OLD_UPDATE, OLD_UPDATE, false, T0,
+                10_000, 10_000 + KioskStartPolicy.RECENT_FRESH_START_MS);
+        assertTrue(d.clearTask);
+        assertFalse(d.joinsFreshStart);
+    }
+
+    @Test public void startWithLockRunningAfterAFreshStartKeepsTheTask() {
+        KioskStartPolicy.Decision d = KioskStartPolicy.decide(true, OLD_UPDATE, OLD_UPDATE, true, T0, 10_000, 11_000);
+        assertFalse(d.clearTask);
+        assertFalse(d.joinsFreshStart);
+    }
+
+    @Test public void forcedStartIgnoresARecentFreshStart() {
+        KioskStartPolicy.Decision d = KioskStartPolicy.decide(true, T0, OLD_UPDATE, false, T0 + 1_000, 10_000, 11_000);
+        assertTrue(d.clearTask);
+        assertTrue(d.forcedByUpdate);
+        assertFalse(d.joinsFreshStart);
+    }
+
+    @Test public void withoutUpdateTrackingARecentFreshStartKeepsTheUpstreamRule() {
+        KioskStartPolicy.Decision d = KioskStartPolicy.decide(false, 0, 0, false, T0, 10_000, 11_000);
+        assertTrue(d.clearTask);
+        assertFalse(d.joinsFreshStart);
     }
 }
