@@ -23,6 +23,8 @@ The SHA-256 must be the real release key. The TEST key must never be uploaded.
 
 Upload both in the panel under Applications.
 
+Agent `6.40-l24.5` and later send health reports. Do not push them to the fleet until the server's health endpoint answers: `POST /rest/public/plugin-locker24-health/report/{number}` must return JSON with `status` `OK` (or `ERROR` with a message), not 404. Until then every tablet retries its upload, queues up to 288 reports and keeps probing the server.
+
 ## 2. Configuration `hpmo-qa`
 
 - MDM application: `app.locker24.mdm`

@@ -10,6 +10,8 @@ import com.hmdm.launcher.Const;
 import com.hmdm.launcher.helper.SettingsHelper;
 import com.hmdm.launcher.util.RemoteLogger;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -23,12 +25,17 @@ public final class HealthReporter {
 
     private static final long DEFAULT_TICK_MS = WatchdogPolicy.DEFAULT_SECONDS * 1000L;
     private static final Object REQUEST_TOKEN = new Object();
+    static final long ERROR_LOG_INTERVAL_MS = 3_600_000L;
+
     private static final Object LOCK = new Object();
-    private static final Object INIT_LOCK = new Object();
+    private static final Object HANDLER_LOCK = new Object();
+    private static final Object QUEUE_LOCK = new Object();
+    private static final Map<String, Long> ERRORS_LOGGED = new HashMap<>();
 
     private static Handler handler;
     private static HealthQueue queue;
     private static String pendingTrigger;
+    private static Object pendingOwner;
 
     private HealthReporter() {
     }
@@ -73,6 +80,11 @@ public final class HealthReporter {
      * boot request is pending, the replacement keeps the name boot.
      */
     public static void requestSoon(Context context, String trigger, long delayMs) {
+        requestSoon(context, trigger, delayMs, null);
+    }
+
+    /** Same as {@link #requestSoon(Context, String, long)}, remembering {@code owner} for {@link #cancelRequest}. */
+    static void requestSoon(Context context, String trigger, long delayMs, Object owner) {
         if (!isEnabled()) {
             return;
         }
@@ -80,15 +92,38 @@ public final class HealthReporter {
         Handler h = handler();
         synchronized (LOCK) {
             pendingTrigger = HealthSchedule.mergeTrigger(pendingTrigger, trigger);
+            pendingOwner = owner;
             h.removeCallbacksAndMessages(REQUEST_TOKEN);
             h.postAtTime(() -> {
                 String name;
                 synchronized (LOCK) {
                     name = pendingTrigger;
                     pendingTrigger = null;
+                    pendingOwner = null;
                 }
                 collect(ctx, name != null ? name : trigger);
             }, REQUEST_TOKEN, SystemClock.uptimeMillis() + Math.max(0, delayMs));
+        }
+    }
+
+    /** Removes the pending request when {@code owner} made the latest one. */
+    static void cancelRequest(Object owner) {
+        if (owner == null) {
+            return;
+        }
+        synchronized (LOCK) {
+            if (pendingOwner != owner) {
+                return;
+            }
+            Handler h;
+            synchronized (HANDLER_LOCK) {
+                h = handler;
+            }
+            if (h != null) {
+                h.removeCallbacksAndMessages(REQUEST_TOKEN);
+            }
+            pendingTrigger = null;
+            pendingOwner = null;
         }
     }
 
@@ -102,7 +137,7 @@ public final class HealthReporter {
     }
 
     static HealthQueue queue(Context context) {
-        synchronized (INIT_LOCK) {
+        synchronized (QUEUE_LOCK) {
             if (queue == null) {
                 queue = new HealthQueue(FileQueueStore.forContext(context), HealthQueue.MAX);
             }
@@ -111,7 +146,7 @@ public final class HealthReporter {
     }
 
     private static Handler handler() {
-        synchronized (INIT_LOCK) {
+        synchronized (HANDLER_LOCK) {
             if (handler == null) {
                 HandlerThread thread = new HandlerThread("locker24-health");
                 thread.start();
@@ -131,7 +166,7 @@ public final class HealthReporter {
                 collect(ctx, TRIGGER_SCHEDULE);
             }
         } catch (Throwable e) {
-            log(ctx, Const.LOG_WARN, "Health tick failed: " + e);
+            logError(ctx, "Health tick failed: ", e);
         }
     }
 
@@ -147,8 +182,27 @@ public final class HealthReporter {
             HealthCounters.setLastCollectAt(ctx, System.currentTimeMillis());
             HealthUploadWorker.enqueue(ctx);
         } catch (Throwable e) {
-            log(ctx, Const.LOG_WARN, "Health collect failed: " + e);
+            logError(ctx, "Health collect failed: ", e);
         }
+    }
+
+    private static void logError(Context ctx, String prefix, Throwable e) {
+        boolean log;
+        synchronized (ERRORS_LOGGED) {
+            log = shouldLog(ERRORS_LOGGED, prefix + e.getClass().getName(), System.currentTimeMillis());
+        }
+        if (log) {
+            log(ctx, Const.LOG_WARN, prefix + e);
+        }
+    }
+
+    static boolean shouldLog(Map<String, Long> last, String key, long now) {
+        Long prev = last.get(key);
+        if (prev != null && now >= prev && now - prev < ERROR_LOG_INTERVAL_MS) {
+            return false;
+        }
+        last.put(key, now);
+        return true;
     }
 
     private static void log(Context ctx, int level, String message) {

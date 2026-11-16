@@ -28,6 +28,17 @@ public final class UploadOutcome {
         return Result.RETRY;
     }
 
+    /**
+     * One report probes the server on retry runs and after a RETRY; full batches follow only a SENT,
+     * so a server that keeps failing costs one small request per run instead of 50 reports.
+     */
+    public static int batchSize(int runAttemptCount, boolean lastWasRetry, boolean sentThisRun) {
+        if (sentThisRun) {
+            return HealthQueue.BATCH;
+        }
+        return runAttemptCount > 0 || lastWasRetry ? 1 : HealthQueue.BATCH;
+    }
+
     /** True when a failed run should end the work instead of retrying, so KEEP does not block new uploads for hours. */
     public static boolean stopRetrying(int runAttemptCount) {
         return runAttemptCount + 1 >= MAX_RUNS;

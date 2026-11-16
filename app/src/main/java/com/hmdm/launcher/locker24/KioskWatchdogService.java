@@ -357,7 +357,7 @@ public class KioskWatchdogService extends Service {
         }
     }
 
-    /** Returns false when a relaunch less than 5 s ago makes this one a no-op. */
+    /** Returns true only when the launcher activity was started. */
     private boolean relaunch() {
         long now = android.os.SystemClock.elapsedRealtime();
         if (lastRelaunchAt != 0 && now - lastRelaunchAt < 5000) {
@@ -370,6 +370,7 @@ public class KioskWatchdogService extends Service {
             getApplicationContext().startActivity(intent);
         } catch (Throwable e) {
             safeLog(Const.LOG_WARN, "Kiosk watchdog cannot start launcher: " + e);
+            return false;
         }
         return true;
     }
@@ -430,7 +431,7 @@ public class KioskWatchdogService extends Service {
     }
 
     private void registerHealthTriggers() {
-        if (!HealthReporter.isEnabled()) {
+        if (!HealthReporter.isEnabled() || !Utils.isDeviceOwner(this)) {
             return;
         }
         requestHealthReport("boot", HEALTH_BOOT_DELAY_MS);
@@ -470,6 +471,10 @@ public class KioskWatchdogService extends Service {
     }
 
     private void unregisterHealthTriggers() {
+        try {
+            HealthReporter.cancelRequest(this);
+        } catch (Throwable ignored) {
+        }
         if (powerReceiverRegistered) {
             try {
                 unregisterReceiver(powerReceiver);
@@ -491,7 +496,7 @@ public class KioskWatchdogService extends Service {
 
     private void requestHealthReport(String trigger, long delayMs) {
         try {
-            HealthReporter.requestSoon(getApplicationContext(), trigger, delayMs);
+            HealthReporter.requestSoon(getApplicationContext(), trigger, delayMs, this);
         } catch (Throwable e) {
             safeLog(Const.LOG_WARN, "Health request failed: " + e);
         }

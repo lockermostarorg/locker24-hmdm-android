@@ -9,7 +9,9 @@ import org.junit.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class HealthReporterPolicyTest {
 
@@ -81,5 +83,36 @@ public class HealthReporterPolicyTest {
         assertEquals(new ArrayList<Long>(), HealthCounters.parseStamps(""));
         assertEquals(Arrays.asList(5L, 7L), HealthCounters.parseStamps(" 5,x,,7 ,"));
         assertEquals("", HealthCounters.formatStamps(new ArrayList<Long>()));
+    }
+
+    @Test
+    public void firstRunAfterSuccessSendsAFullBatch() {
+        assertEquals(HealthQueue.BATCH, UploadOutcome.batchSize(0, false, false));
+    }
+
+    @Test
+    public void retryRunsAndRunsAfterARetrySendOneReport() {
+        assertEquals(1, UploadOutcome.batchSize(1, false, false));
+        assertEquals(1, UploadOutcome.batchSize(4, false, false));
+        assertEquals(1, UploadOutcome.batchSize(0, true, false));
+        assertEquals(1, UploadOutcome.batchSize(3, true, false));
+    }
+
+    @Test
+    public void aSentProbeOpensFullBatches() {
+        assertEquals(HealthQueue.BATCH, UploadOutcome.batchSize(0, true, true));
+        assertEquals(HealthQueue.BATCH, UploadOutcome.batchSize(4, true, true));
+    }
+
+    @Test
+    public void errorLogsOncePerClassPerHour() {
+        Map<String, Long> last = new HashMap<>();
+        long hour = HealthReporter.ERROR_LOG_INTERVAL_MS;
+        assertEquals(3_600_000L, hour);
+        assertTrue(HealthReporter.shouldLog(last, "IllegalStateException", 1_000L));
+        assertFalse(HealthReporter.shouldLog(last, "IllegalStateException", 1_000L + hour - 1));
+        assertTrue(HealthReporter.shouldLog(last, "NullPointerException", 2_000L));
+        assertTrue(HealthReporter.shouldLog(last, "IllegalStateException", 1_000L + hour));
+        assertTrue(HealthReporter.shouldLog(last, "NullPointerException", 1_000L));
     }
 }

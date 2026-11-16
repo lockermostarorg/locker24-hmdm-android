@@ -67,8 +67,11 @@ public class HealthUploadWorker extends Worker {
             HealthApi api = HealthApi.Factory.get(baseUrl);
             HealthQueue queue = HealthReporter.queue(ctx);
             boolean dropLogged = false;
+            boolean sentThisRun = false;
+            boolean lastWasRetry = HealthCounters.getLastUploadRetry(ctx);
             for (int round = 0; round < MAX_BATCHES_PER_RUN; round++) {
-                List<String> batch = queue.peek(HealthQueue.BATCH);
+                List<String> batch = queue.peek(
+                        UploadOutcome.batchSize(getRunAttemptCount(), lastWasRetry, sentThisRun));
                 if (batch.isEmpty()) {
                     return Result.success();
                 }
@@ -104,6 +107,10 @@ public class HealthUploadWorker extends Worker {
                 }
                 switch (outcome) {
                     case SENT:
+                        if (!sentThisRun) {
+                            sentThisRun = true;
+                            HealthCounters.setLastUploadRetry(ctx, false);
+                        }
                         queue.removeSent(batch);
                         break;
                     case DROP:
@@ -115,6 +122,7 @@ public class HealthUploadWorker extends Worker {
                         }
                         break;
                     default:
+                        HealthCounters.setLastUploadRetry(ctx, true);
                         return retryOrStop();
                 }
             }

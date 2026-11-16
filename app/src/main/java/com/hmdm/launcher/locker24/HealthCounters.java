@@ -11,6 +11,7 @@ public final class HealthCounters {
     private static final String KEY_WATCHDOG_RESTARTS = "watchdog_restarts";
     private static final String KEY_LAST_CONFIG_SYNC_AT = "last_config_sync_at";
     private static final String KEY_LAST_COLLECT_AT = "last_collect_at";
+    private static final String KEY_LAST_UPLOAD_RETRY = "last_upload_retry";
 
     private static final Object RESTARTS_LOCK = new Object();
 
@@ -49,6 +50,14 @@ public final class HealthCounters {
     /** 0 when nothing has been collected yet. */
     public static long getLastCollectAt(Context context) {
         return prefs(context).getLong(KEY_LAST_COLLECT_AT, 0);
+    }
+
+    public static boolean getLastUploadRetry(Context context) {
+        return prefs(context).getBoolean(KEY_LAST_UPLOAD_RETRY, false);
+    }
+
+    public static void setLastUploadRetry(Context context, boolean retry) {
+        prefs(context).edit().putBoolean(KEY_LAST_UPLOAD_RETRY, retry).apply();
     }
 
     static List<Long> parseStamps(String csv) {
