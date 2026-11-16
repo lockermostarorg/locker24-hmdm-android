@@ -13,7 +13,6 @@ import com.hmdm.launcher.util.RemoteLogger;
 
 /** The process-wide ConfigFlowGate for ConfigUpdater flows. */
 public final class ConfigFlows {
-    private static final Object BACKGROUND = new Object();
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
     private static final class Request {
@@ -41,13 +40,14 @@ public final class ConfigFlows {
 
         @Override
         public Object key(Request request) {
-            return request.notifier != null ? request.notifier : BACKGROUND;
+            return ConfigFlowPolicy.key(request.notifier);
         }
 
         @Override
         public Request merge(Request pending, Request next) {
             return new Request(next.updater, next.context, next.notifier,
-                    pending.userInteraction || next.userInteraction, pending.skipLoad && next.skipLoad);
+                    ConfigFlowPolicy.mergeUserInteraction(pending.userInteraction, next.userInteraction),
+                    ConfigFlowPolicy.mergeSkipLoad(pending.skipLoad, next.skipLoad));
         }
 
         @Override
