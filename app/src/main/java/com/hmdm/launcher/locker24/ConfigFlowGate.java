@@ -8,7 +8,8 @@ import java.util.Map;
  * Lets one configuration update flow run per process. A request made while a flow runs is kept
  * and runs once more after that flow finishes; requests with the same key are merged. A flow that
  * has run for STALE_MS, or whose listener is gone, is taken over by the next request from another
- * flow, and the old flow is told it is superseded so it stops at its next step.
+ * flow, and the old flow is told it is superseded so it stops at its next step. A flow that stalls
+ * without a request behind it is released by expire() after STALE_MS.
  */
 public final class ConfigFlowGate<T> {
     public static final long STALE_MS = 10 * 60_000L;
@@ -70,6 +71,23 @@ public final class ConfigFlowGate<T> {
             return null;
         }
         owner = null;
+        return takeNext();
+    }
+
+    /** Releases the gate if the flow started by this request still owns it. */
+    public synchronized boolean expire(T request) {
+        if (owner != request) {
+            return false;
+        }
+        owner = null;
+        return true;
+    }
+
+    /** The next queued request when no flow owns the gate, or null. */
+    public synchronized T takeNext() {
+        if (owner != null) {
+            return null;
+        }
         Iterator<T> it = pending.values().iterator();
         if (!it.hasNext()) {
             return null;

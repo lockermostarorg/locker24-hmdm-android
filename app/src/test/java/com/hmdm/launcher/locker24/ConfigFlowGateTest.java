@@ -144,4 +144,54 @@ public class ConfigFlowGateTest {
         assertFalse(gate.superseded(flow));
         assertNull(gate.finish(flow));
     }
+
+    @Test public void expiryReleasesAStalledFlowAndRunsTheQueue() {
+        ConfigFlowGate<Req> gate = gate();
+        Object stalled = new Object();
+        Object push = new Object();
+        Req first = new Req(stalled, stalled, false);
+        gate.request(first, T);
+        gate.request(new Req(push, push, false), T + 1);
+
+        assertTrue(gate.expire(first));
+        Req next = gate.takeNext();
+        assertSame(push, next.flow);
+        assertEquals(ConfigFlowGate.Decision.START, gate.request(next, T + 2));
+        assertNull(gate.finish(push));
+        assertNull(gate.takeNext());
+    }
+
+    @Test public void expiryOfAFlowThatNoLongerOwnsTheGateDoesNothing() {
+        ConfigFlowGate<Req> gate = gate();
+        Object flow = new Object();
+        Req first = new Req(flow, flow, false);
+        gate.request(first, T);
+        assertNull(gate.finish(flow));
+        assertFalse(gate.expire(first));
+
+        Req second = new Req(flow, flow, false);
+        gate.request(second, T + 10);
+        assertFalse(gate.expire(first));
+        assertTrue(gate.superseded(new Object()));
+        Object other = new Object();
+        gate.request(new Req(other, other, false), T + 11);
+        assertNull(gate.takeNext());
+        assertTrue(gate.expire(second));
+        assertSame(other, gate.takeNext().flow);
+    }
+
+    @Test public void queuedRequestsStillRunAfterATakeover() {
+        ConfigFlowGate<Req> gate = gate();
+        Object stale = new Object();
+        Object plugin = new Object();
+        Object launcher = new Object();
+        gate.request(new Req(stale, stale, false), T);
+        gate.request(new Req(plugin, plugin, true), T + 1);
+        assertEquals(ConfigFlowGate.Decision.TAKEOVER_STALE, gate.request(new Req(launcher, launcher, false), T + STALE));
+
+        assertNull(gate.finish(stale));
+        Req next = gate.finish(launcher);
+        assertSame(plugin, next.flow);
+        assertTrue(next.userInteraction);
+    }
 }

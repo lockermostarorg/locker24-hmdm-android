@@ -158,6 +158,8 @@ public class Initializer {
         // Send pending logs to server
         RemoteLogger.sendLogsToServer(context);
 
+        final ConfigUpdater configUpdater = new ConfigUpdater(context);
+        // Errors take the non-interactive path, so the flow goes on and ends
         final ConfigUpdater.UINotifier uiNotifier = new ConfigUpdater.UINotifier() {
             @Override
             public void onConfigUpdateStart() {
@@ -189,10 +191,12 @@ public class Initializer {
 
             @Override
             public void onFileDownloadError(RemoteFile remoteFile) {
+                configUpdater.repeatDownloadFiles();
             }
 
             @Override
             public void onFileInstallError(RemoteFile remoteFile) {
+                configUpdater.repeatDownloadFiles();
             }
 
             @Override
@@ -213,10 +217,12 @@ public class Initializer {
 
             @Override
             public void onAppDownloadError(Application application) {
+                configUpdater.skipDownloadApps();
             }
 
             @Override
             public void onAppInstallError(String packageName) {
+                new Handler(Looper.getMainLooper()).post(configUpdater::repeatDownloadApps);
             }
 
             @Override
@@ -236,7 +242,7 @@ public class Initializer {
             public void onAllAppInstallComplete() {
             }
         };
-        ConfigUpdater.forceConfigUpdate(context, uiNotifier, false);
+        configUpdater.updateConfig(context, uiNotifier, false);
     }
 
     // Used by InitialSetupActivity

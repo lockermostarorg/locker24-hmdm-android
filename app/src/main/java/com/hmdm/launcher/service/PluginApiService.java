@@ -213,8 +213,9 @@ public class PluginApiService extends Service {
             mainHandler.post(new Runnable() {
                 @Override
                 public void run() {
-                    ConfigUpdater.forceConfigUpdate(PluginApiService.this,
-                            new CallbackUINotifier(callback), true);
+                    ConfigUpdater configUpdater = new ConfigUpdater(PluginApiService.this);
+                    configUpdater.updateConfig(PluginApiService.this,
+                            new CallbackUINotifier(callback, configUpdater), true);
                 }
             });
         }
@@ -239,9 +240,11 @@ public class PluginApiService extends Service {
      */
     private static class CallbackUINotifier implements ConfigUpdater.UINotifier {
         private final IMdmApiCallback callback;
+        private final ConfigUpdater configUpdater;
 
-        CallbackUINotifier(IMdmApiCallback callback) {
+        CallbackUINotifier(IMdmApiCallback callback, ConfigUpdater configUpdater) {
             this.callback = callback;
+            this.configUpdater = configUpdater;
         }
 
         @Override
@@ -282,11 +285,13 @@ public class PluginApiService extends Service {
         @Override
         public void onFileDownloadError(RemoteFile remoteFile) {
             try { callback.onFileError(ERR_DOWNLOAD, remoteFile != null ? remoteFile.getPath() : null); } catch (RemoteException ignored) {}
+            configUpdater.repeatDownloadFiles();
         }
 
         @Override
         public void onFileInstallError(RemoteFile remoteFile) {
             try { callback.onFileError(ERR_INSTALL, remoteFile != null ? remoteFile.getPath() : null); } catch (RemoteException ignored) {}
+            configUpdater.repeatDownloadFiles();
         }
 
         @Override
@@ -315,11 +320,13 @@ public class PluginApiService extends Service {
         @Override
         public void onAppDownloadError(Application application) {
             try { callback.onAppError(ERR_DOWNLOAD, application != null ? application.getPkg() : null); } catch (RemoteException ignored) {}
+            configUpdater.skipDownloadApps();
         }
 
         @Override
         public void onAppInstallError(String packageName) {
             try { callback.onAppError(ERR_INSTALL, packageName); } catch (RemoteException ignored) {}
+            new Handler(Looper.getMainLooper()).post(configUpdater::repeatDownloadApps);
         }
 
         @Override

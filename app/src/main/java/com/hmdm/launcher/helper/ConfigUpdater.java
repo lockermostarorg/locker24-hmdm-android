@@ -54,10 +54,10 @@ import java.net.URL;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.GregorianCalendar;
-import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class ConfigUpdater {
 
@@ -90,7 +90,8 @@ public class ConfigUpdater {
     private List<RemoteFile> filesForInstall = new LinkedList();
     private List< Application > applicationsForInstall = new LinkedList();
     private List< Application > applicationsForRun = new LinkedList();
-    private Map<String, File> pendingInstallations = new HashMap<String,File>();
+    // Shared by all flows, so a flow that takes over skips a package another flow is still installing
+    private static final Map<String, File> pendingInstallations = new ConcurrentHashMap<>();
     private BroadcastReceiver appInstallReceiver;
     private int retryCount;
     private int retryDelay;
@@ -167,7 +168,7 @@ public class ConfigUpdater {
                 super.onPostExecute( result );
                 configInitializing = false;
                 Log.i(Const.LOG_TAG, "updateConfig(): set configInitializing=false after getting config");
-                if (ConfigFlows.superseded(ConfigUpdater.this, context, "applying the configuration")) {
+                if (stopIfSuperseded("applying the configuration")) {
                     return;
                 }
 
@@ -221,7 +222,7 @@ public class ConfigUpdater {
     }
 
     public void skipConfigLoad() {
-        if (!ConfigFlows.begin(this, context, uiNotifier, userInteraction)) {
+        if (!ConfigFlows.beginSkippingLoad(this, context, uiNotifier, userInteraction)) {
             return;
         }
         updateRemoteLogConfig();
@@ -512,7 +513,7 @@ public class ConfigUpdater {
     }
 
     private void loadAndInstallFiles() {
-        if (ConfigFlows.superseded(this, context, "updating files")) {
+        if (stopIfSuperseded("updating files")) {
             return;
         }
         boolean isGoodNetworkForUpdate = userInteraction || checkUpdateNetworkRestriction(settingsHelper.getConfig(), context);
@@ -801,7 +802,7 @@ public class ConfigUpdater {
 
     // Here we avoid ConcurrentModificationException by executing all operations with applicationForInstall list in a main thread
     private void loadAndInstallApplications() {
-        if (ConfigFlows.superseded(this, context, "updating applications")) {
+        if (stopIfSuperseded("updating applications")) {
             return;
         }
         boolean isGoodTimeForAppUpdate = userInteraction || checkAppUpdateTimeRestriction(settingsHelper.getConfig());
@@ -955,6 +956,8 @@ public class ConfigUpdater {
                             applicationsForInstall.add( 0, applicationStatus.application );
                             if (uiNotifier != null) {
                                 uiNotifier.onAppDownloadError(applicationStatus.application);
+                            } else {
+                                skipDownloadApps();
                             }
                             // onAppDownloadError() method contents
                             /*
@@ -1214,6 +1217,14 @@ public class ConfigUpdater {
         }
     }
 
+    private boolean stopIfSuperseded(String step) {
+        if (!ConfigFlows.superseded(this, context, step)) {
+            return false;
+        }
+        unregisterAppInstallReceiver();
+        return true;
+    }
+
     private void unregisterAppInstallReceiver() {
         if (appInstallReceiver != null) {
             try {
@@ -1240,6 +1251,9 @@ public class ConfigUpdater {
 
     // This function is called from a background thread
     private void installApplication( File file, final String packageName, final String version ) {
+        if (stopIfSuperseded("installing " + packageName)) {
+            return;
+        }
         if (packageName.equals(context.getPackageName()) &&
                 context.getPackageManager().getLaunchIntentForPackage(Const.LAUNCHER_RESTARTER_PACKAGE_ID) != null) {
             // Restart self in EMUI: there's no auto restart after update in EMUI, we must use a helper app
@@ -1259,6 +1273,8 @@ public class ConfigUpdater {
                     }
                     if (uiNotifier != null) {
                         uiNotifier.onAppInstallError(packageName);
+                    } else {
+                        handler.post(() -> loadAndInstallApplications());
                     }
                     if (msg != null) {
                         RemoteLogger.log(context, Const.LOG_WARN, "Failed to install app " + packageName + ": " + msg);
