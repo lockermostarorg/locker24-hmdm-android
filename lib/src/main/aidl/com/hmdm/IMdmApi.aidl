@@ -67,4 +67,11 @@ interface IMdmApi {
      * to the supplied callback. Pass null to behave like forceConfigUpdate().
      */
     void forceConfigUpdateWithCallback(IMdmApiCallback callback);
+
+    // Added by Locker24 MDM. Keep it last of our additions; upstream methods go after it.
+    /**
+     * The kiosk app publishes its health values (locker_short_uid, last_api_ok_at,
+     * last_api_error_at, last_api_error, app_errors_24h). Returns true when stored.
+     */
+    boolean publishHealth(in Bundle values);
 }

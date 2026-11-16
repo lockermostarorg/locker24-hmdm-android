@@ -21,6 +21,7 @@ package com.hmdm.launcher.service;
 
 import android.app.Service;
 import android.content.Intent;
+import android.os.Binder;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
@@ -36,6 +37,7 @@ import com.hmdm.launcher.BuildConfig;
 import com.hmdm.launcher.Const;
 import com.hmdm.launcher.helper.ConfigUpdater;
 import com.hmdm.launcher.helper.SettingsHelper;
+import com.hmdm.launcher.locker24.HealthValues;
 import com.hmdm.launcher.json.Application;
 import com.hmdm.launcher.json.PushMessage;
 import com.hmdm.launcher.json.RemoteFile;
@@ -230,6 +232,11 @@ public class PluginApiService extends Service {
             message.setPayload(payload);
             PushNotificationProcessor.process(message, PluginApiService.this);
             return true;
+        }
+
+        @Override
+        public boolean publishHealth(Bundle values) {
+            return HealthValues.publish(PluginApiService.this, Binder.getCallingUid(), values);
         }
     };
 
