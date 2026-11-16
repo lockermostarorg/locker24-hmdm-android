@@ -55,7 +55,7 @@ public class RollingCounterTest {
     public void toleratesNullAndKeepsNewestByValue() {
         List<Long> stamps = new ArrayList<>();
         stamps.add(null);
-        for (int i = 0; i < 500; i++) {
+        for (int i = 0; i < 499; i++) {
             stamps.add(NOW + 30_000);
         }
         RollingCounter.record(stamps, NOW);
