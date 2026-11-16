@@ -76,7 +76,15 @@ public class KioskWatchdogService extends Service {
                     return;
                 }
                 if (ProUtils.isKioskModeRunning(ctx)) {
-                    safeLog(Const.LOG_DEBUG, "Kiosk app replace recheck: lock task engaged");
+                    boolean handled = KioskState.markUpdateHandledIfEngaged(ctx, true);
+                    safeLog(Const.LOG_DEBUG, "Kiosk app replace recheck: lock task engaged"
+                            + (handled ? ", update handled" : ""));
+                    return;
+                }
+                if (KioskStartPolicy.freshStartRecent(KioskState.getLastFreshStartAt(),
+                        android.os.SystemClock.elapsedRealtime())) {
+                    safeLog(Const.LOG_INFO, "Kiosk app replace recheck: lock task gone, but a fresh start is "
+                            + "under way, not relaunching");
                     return;
                 }
                 safeLog(Const.LOG_WARN, "Kiosk app replace recheck: lock task gone, relaunching launcher");

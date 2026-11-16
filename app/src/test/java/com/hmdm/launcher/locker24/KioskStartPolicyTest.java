@@ -28,8 +28,16 @@ public class KioskStartPolicyTest {
             return d;
         }
 
-        void boot() {
-            handled = lastUpdateTime;
+        void boot(long now, long elapsedSinceBoot) {
+            if (KioskStartPolicy.installPredatesBoot(lastUpdateTime, now, elapsedSinceBoot)) {
+                handled = lastUpdateTime;
+            }
+        }
+
+        void lockCheck(boolean locked, long now) {
+            if (KioskStartPolicy.engagedAnswersUpdate(locked, lastUpdateTime, handled, now)) {
+                handled = lastUpdateTime;
+            }
         }
     }
 
@@ -45,18 +53,52 @@ public class KioskStartPolicyTest {
         assertFalse(second.clearTask);
         assertFalse(second.forcedByUpdate);
 
-        KioskStartPolicy.Decision third = d.start(true, T0 + 90_000);
+        KioskStartPolicy.Decision third = d.start(true, T0 + 20_000);
         assertFalse(third.clearTask);
         assertFalse(third.forcedByUpdate);
     }
 
-    @Test public void startsBeforeTheReplacementDoNotUseUpTheUpdate() {
+    @Test public void startRightAfterTheReplacementIsForcedEvenIfAnEarlierStartReadTheOldValue() {
         Device d = new Device(OLD_UPDATE, OLD_UPDATE);
-        assertFalse(d.start(true, T0 - 2_000).clearTask);
+        assertFalse(d.start(true, T0 - 500).clearTask);
         d.lastUpdateTime = T0;
         KioskStartPolicy.Decision after = d.start(true, T0 + 500);
         assertTrue(after.clearTask);
         assertTrue(after.forcedByUpdate);
+    }
+
+    @Test public void lockHoldingAfterTheUpdateAnswersItWhenTheStartReadTheOldValue() {
+        Device d = new Device(OLD_UPDATE, OLD_UPDATE);
+        assertTrue(d.start(false, T0 - 500).clearTask);
+        d.lastUpdateTime = T0;
+
+        d.lockCheck(true, T0 + 6_000);
+        assertEquals(T0, d.handled);
+
+        KioskStartPolicy.Decision inWindow = d.start(true, T0 + 20_000);
+        assertFalse(inWindow.clearTask);
+        assertFalse(inWindow.forcedByUpdate);
+        assertFalse(d.start(true, T0 + 60_000).clearTask);
+    }
+
+    @Test public void staleLockRightAfterTheReplacementDoesNotAnswerTheUpdate() {
+        Device d = new Device(OLD_UPDATE, OLD_UPDATE);
+        d.lastUpdateTime = T0;
+        d.lockCheck(true, T0 + 1_000);
+        d.lockCheck(true, T0 + KioskStartPolicy.ENGAGED_AFTER_UPDATE_MS);
+        assertEquals(OLD_UPDATE, d.handled);
+
+        KioskStartPolicy.Decision s = d.start(true, T0 + 6_000);
+        assertTrue(s.clearTask);
+        assertTrue(s.forcedByUpdate);
+    }
+
+    @Test public void lockNotEngagedLeavesTheUpdateOpen() {
+        Device d = new Device(OLD_UPDATE, OLD_UPDATE);
+        d.lastUpdateTime = T0;
+        d.lockCheck(false, T0 + 10_000);
+        assertEquals(OLD_UPDATE, d.handled);
+        assertTrue(d.start(true, T0 + 12_000).forcedByUpdate);
     }
 
     @Test public void failedInstallNeverClearsAHealthyTask() {
@@ -68,18 +110,37 @@ public class KioskStartPolicyTest {
         }
     }
 
-    @Test public void rebootAnswersTheUpdate() {
+    @Test public void rebootAnswersAnUpdateInstalledBeforeIt() {
         Device d = new Device(OLD_UPDATE, OLD_UPDATE);
         d.lastUpdateTime = T0;
-        d.boot();
+        long bootAt = T0 + 2_000;
+        d.boot(bootAt + 25_000, 25_000);
 
-        KioskStartPolicy.Decision atBoot = d.start(false, T0 + 30_000);
+        KioskStartPolicy.Decision atBoot = d.start(false, bootAt + 26_000);
         assertTrue(atBoot.clearTask);
         assertFalse(atBoot.forcedByUpdate);
 
-        KioskStartPolicy.Decision later = d.start(true, T0 + 60_000);
+        KioskStartPolicy.Decision later = d.start(true, bootAt + 27_000);
         assertFalse(later.clearTask);
         assertFalse(later.forcedByUpdate);
+    }
+
+    @Test public void lateBootCompletedDoesNotSwallowAnUpdateInstalledAfterBoot() {
+        long bootAt = T0 - 60_000;
+        Device d = new Device(OLD_UPDATE, OLD_UPDATE);
+        d.lastUpdateTime = T0;
+        d.boot(T0 + 1_000, T0 + 1_000 - bootAt);
+        assertEquals(OLD_UPDATE, d.handled);
+
+        KioskStartPolicy.Decision s = d.start(true, T0 + 2_000);
+        assertTrue(s.clearTask);
+        assertTrue(s.forcedByUpdate);
+    }
+
+    @Test public void installPredatesBootEdges() {
+        assertTrue(KioskStartPolicy.installPredatesBoot(T0 - 1, T0 + 10_000, 10_000));
+        assertFalse(KioskStartPolicy.installPredatesBoot(T0, T0 + 10_000, 10_000));
+        assertFalse(KioskStartPolicy.installPredatesBoot(0, T0, 10_000));
     }
 
     @Test public void updateThenStartWithLockNotRunningClearsAndUsesUpTheUpdate() {
@@ -165,18 +226,20 @@ public class KioskStartPolicyTest {
         assertEquals(OLD_UPDATE, d.handled);
     }
 
-    @Test public void retriesOnlyOnceAfterAnUpdateStartThatDidNotEngage() {
-        assertTrue(KioskStartPolicy.shouldRetry(true, false, false, true, false));
-        assertFalse(KioskStartPolicy.shouldRetry(true, true, false, true, false));
-    }
-
-    @Test public void noRetryForOrdinaryStarts() {
-        assertFalse(KioskStartPolicy.shouldRetry(false, false, false, true, false));
+    @Test public void retriesWhenLockNotEngagedAndKioskStillWanted() {
+        assertTrue(KioskStartPolicy.shouldRetry(false, true, false));
     }
 
     @Test public void noRetryWhenEngagedNotRequiredOrAdminUnlocked() {
-        assertFalse(KioskStartPolicy.shouldRetry(true, false, true, true, false));
-        assertFalse(KioskStartPolicy.shouldRetry(true, false, false, false, false));
-        assertFalse(KioskStartPolicy.shouldRetry(true, false, false, true, true));
+        assertFalse(KioskStartPolicy.shouldRetry(true, true, false));
+        assertFalse(KioskStartPolicy.shouldRetry(false, false, false));
+        assertFalse(KioskStartPolicy.shouldRetry(false, true, true));
+    }
+
+    @Test public void recentFreshStartWindow() {
+        assertFalse(KioskStartPolicy.freshStartRecent(0, 10_000));
+        assertTrue(KioskStartPolicy.freshStartRecent(10_000, 10_000));
+        assertTrue(KioskStartPolicy.freshStartRecent(10_000, 10_000 + KioskStartPolicy.RECENT_FRESH_START_MS - 1));
+        assertFalse(KioskStartPolicy.freshStartRecent(10_000, 10_000 + KioskStartPolicy.RECENT_FRESH_START_MS));
     }
 }

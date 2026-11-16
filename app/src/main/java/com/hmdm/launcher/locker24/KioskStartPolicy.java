@@ -9,9 +9,12 @@ package com.hmdm.launcher.locker24;
  * A failed install leaves lastUpdateTime unchanged, so it never forces a fresh start.
  */
 public final class KioskStartPolicy {
-    public static final long UPDATE_WINDOW_MS = 120_000;
+    public static final long UPDATE_WINDOW_MS = 30_000;
     public static final long CLOCK_SKEW_MS = 60_000;
     public static final long RETRY_CHECK_MS = 3_000;
+    public static final long SETTLED_CHECK_MS = 10_000;
+    public static final long ENGAGED_AFTER_UPDATE_MS = 5_000;
+    public static final long RECENT_FRESH_START_MS = 5_000;
 
     private KioskStartPolicy() {
     }
@@ -50,8 +53,28 @@ public final class KioskStartPolicy {
         return age <= UPDATE_WINDOW_MS && age > -CLOCK_SKEW_MS;
     }
 
-    public static boolean shouldRetry(boolean forcedByUpdate, boolean alreadyRetried, boolean lockTaskLocked,
-                                      boolean kioskRequired, boolean adminUnlocked) {
-        return forcedByUpdate && !alreadyRetried && !lockTaskLocked && kioskRequired && !adminUnlocked;
+    public static boolean shouldRetry(boolean lockTaskLocked, boolean kioskRequired, boolean adminUnlocked) {
+        return !lockTaskLocked && kioskRequired && !adminUnlocked;
+    }
+
+    /**
+     * Lock task holding more than ENGAGED_AFTER_UPDATE_MS after an update means the updated app is
+     * alive, so the update needs no forced fresh start. The margin skips the moment right after a
+     * replacement where lock task can still read LOCKED for the dead task.
+     */
+    public static boolean engagedAnswersUpdate(boolean lockTaskLocked, long lastUpdateTime, long handledUpdate,
+                                               long nowWall) {
+        return lockTaskLocked && lastUpdateTime > 0 && lastUpdateTime != handledUpdate
+                && nowWall - lastUpdateTime > ENGAGED_AFTER_UPDATE_MS;
+    }
+
+    /** True when the install happened before the current boot (BOOT_COMPLETED can arrive late). */
+    public static boolean installPredatesBoot(long lastUpdateTime, long nowWall, long elapsedSinceBoot) {
+        return lastUpdateTime > 0 && lastUpdateTime < nowWall - elapsedSinceBoot;
+    }
+
+    public static boolean freshStartRecent(long lastFreshStartAt, long nowElapsed) {
+        return lastFreshStartAt > 0 && nowElapsed >= lastFreshStartAt
+                && nowElapsed - lastFreshStartAt < RECENT_FRESH_START_MS;
     }
 }

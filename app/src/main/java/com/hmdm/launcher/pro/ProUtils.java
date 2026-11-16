@@ -30,6 +30,7 @@ import android.location.Location;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.util.Log;
 import android.view.View;
 
@@ -271,9 +272,6 @@ public class ProUtils {
             long nowWall = System.currentTimeMillis();
             KioskStartPolicy.Decision decision = KioskStartPolicy.decide(updateTracking, lastUpdateTime,
                     handledUpdate, kioskRunning, nowWall);
-            if (decision.newHandled != handledUpdate) {
-                KioskState.setHandledKioskUpdateTime(activity, decision.newHandled);
-            }
             if (decision.clearTask) {
                 intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK);
             }
@@ -291,6 +289,12 @@ public class ProUtils {
                 // start the app and rely on the allowlist only.
                 activity.startActivity(intent);
             }
+            if (decision.newHandled != handledUpdate) {
+                KioskState.setHandledKioskUpdateTime(activity, decision.newHandled);
+            }
+            if (decision.forcedByUpdate) {
+                KioskState.setLastFreshStartAt(SystemClock.elapsedRealtime());
+            }
             final Context appContext = activity.getApplicationContext();
             new Handler(Looper.getMainLooper()).postDelayed(() -> {
                 if (!isKioskModeRunning(appContext)) {
@@ -300,6 +304,9 @@ public class ProUtils {
             }, 1000);
             if (decision.forcedByUpdate) {
                 scheduleUpdateRetryCheck(appContext, new WeakReference<>(activity), kioskApp, false);
+            }
+            if (updateTracking) {
+                scheduleUpdateSettledCheck(appContext);
             }
             new Handler(Looper.getMainLooper()).postDelayed(() ->
                     RemoteLogger.log(appContext, Const.LOG_DEBUG, "Kiosk start +5s: lockTaskRunning="
@@ -323,7 +330,7 @@ public class ProUtils {
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
                         && !kioskApp.equals(appContext.getPackageName())
-                        && KioskStartPolicy.shouldRetry(true, false, locked, kioskModeRequired(appContext),
+                        && KioskStartPolicy.shouldRetry(locked, kioskModeRequired(appContext),
                                 KioskState.isAdminUnlocked(appContext))) {
                     retryFreshKioskStart(appContext, activityRef, kioskApp);
                 }
@@ -350,7 +357,21 @@ public class ProUtils {
                 + "starting " + kioskApp + " fresh (from " + (useActivity ? "launcher" : "service context") + ", "
                 + Utils.orientationDiag(appContext) + ")");
         starter.startActivity(intent, ActivityOptions.makeBasic().setLockTaskEnabled(true).toBundle());
+        KioskState.setLastFreshStartAt(SystemClock.elapsedRealtime());
         scheduleUpdateRetryCheck(appContext, activityRef, kioskApp, true);
+        scheduleUpdateSettledCheck(appContext);
+    }
+
+    private static void scheduleUpdateSettledCheck(final Context appContext) {
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            try {
+                if (KioskState.markUpdateHandledIfEngaged(appContext, isKioskModeRunning(appContext))) {
+                    RemoteLogger.log(appContext, Const.LOG_DEBUG, "Kiosk app update handled: lock task engaged");
+                }
+            } catch (RuntimeException e) {
+                logError(appContext, "Kiosk update settled check failed", e);
+            }
+        }, KioskStartPolicy.SETTLED_CHECK_MS);
     }
 
     // Set/update kiosk mode options (lock tack features)

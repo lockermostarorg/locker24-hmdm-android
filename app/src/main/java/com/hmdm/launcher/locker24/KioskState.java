@@ -3,6 +3,7 @@ package com.hmdm.launcher.locker24;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.os.SystemClock;
 
 import com.hmdm.launcher.helper.SettingsHelper;
 import com.hmdm.launcher.json.ServerConfig;
@@ -14,6 +15,7 @@ public class KioskState {
     private static final String KEY_HANDLED_KIOSK_UPDATE_TIME = "handled_kiosk_update_time";
 
     private static volatile boolean launcherResumed;
+    private static volatile long lastFreshStartAt;
 
     public static boolean isLauncherResumed() {
         return launcherResumed;
@@ -59,14 +61,40 @@ public class KioskState {
         }
     }
 
-    /** A reboot starts the kiosk app fresh anyway, so the current install needs no forced fresh start. */
+    /**
+     * A reboot starts the kiosk app fresh anyway, so an install from before this boot needs no
+     * forced fresh start. BOOT_COMPLETED can arrive late, so an install after the boot stays open.
+     */
     public static void markCurrentKioskUpdateHandled(Context context) {
-        ServerConfig config = SettingsHelper.getInstance(context).getConfig();
-        String mainApp = config != null ? config.getMainApp() : null;
-        long lastUpdateTime = kioskAppLastUpdateTime(context, mainApp);
-        if (lastUpdateTime > 0) {
+        long lastUpdateTime = kioskAppLastUpdateTime(context, mainApp(context));
+        if (KioskStartPolicy.installPredatesBoot(lastUpdateTime, System.currentTimeMillis(),
+                SystemClock.elapsedRealtime())) {
             setHandledKioskUpdateTime(context, lastUpdateTime);
         }
+    }
+
+    /** Marks the kiosk app's update handled when lock task has held well past it. Returns true if it did. */
+    public static boolean markUpdateHandledIfEngaged(Context context, boolean lockTaskLocked) {
+        long lastUpdateTime = kioskAppLastUpdateTime(context, mainApp(context));
+        if (!KioskStartPolicy.engagedAnswersUpdate(lockTaskLocked, lastUpdateTime,
+                getHandledKioskUpdateTime(context), System.currentTimeMillis())) {
+            return false;
+        }
+        setHandledKioskUpdateTime(context, lastUpdateTime);
+        return true;
+    }
+
+    public static long getLastFreshStartAt() {
+        return lastFreshStartAt;
+    }
+
+    public static void setLastFreshStartAt(long elapsedRealtime) {
+        lastFreshStartAt = elapsedRealtime;
+    }
+
+    private static String mainApp(Context context) {
+        ServerConfig config = SettingsHelper.getInstance(context).getConfig();
+        return config != null ? config.getMainApp() : null;
     }
 
     private static SharedPreferences prefs(Context context) {
