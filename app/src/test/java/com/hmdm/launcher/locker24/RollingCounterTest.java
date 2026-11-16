@@ -44,4 +44,22 @@ public class RollingCounterTest {
         RollingCounter.record(stamps, NOW);
         assertEquals(Arrays.asList(NOW), stamps);
     }
+
+    @Test
+    public void futureBoundaryIs60Seconds() {
+        List<Long> stamps = new ArrayList<>(Arrays.asList(NOW + 60_000, NOW + 60_001));
+        assertEquals(1, RollingCounter.count(stamps, NOW));
+    }
+
+    @Test
+    public void toleratesNullAndKeepsNewestByValue() {
+        List<Long> stamps = new ArrayList<>();
+        stamps.add(null);
+        for (int i = 0; i < 500; i++) {
+            stamps.add(NOW + 30_000);
+        }
+        RollingCounter.record(stamps, NOW);
+        assertEquals(500, stamps.size());
+        assertEquals(Long.valueOf(NOW), stamps.get(0));
+    }
 }

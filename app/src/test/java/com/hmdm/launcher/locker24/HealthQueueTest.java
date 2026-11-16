@@ -10,7 +10,7 @@ import java.util.List;
 import org.junit.Test;
 
 public class HealthQueueTest {
-    private static final class MemoryStore implements QueueStore {
+    private static class MemoryStore implements QueueStore {
         List<String> lines = new ArrayList<>();
 
         @Override
@@ -85,5 +85,102 @@ public class HealthQueueTest {
         HealthQueue queue = new HealthQueue(store, HealthQueue.MAX);
         assertEquals(288, queue.size());
         assertEquals(Collections.singletonList("r13"), queue.peek(1));
+    }
+
+    @Test
+    public void exactly288DropsNothing() {
+        HealthQueue queue = fill(new MemoryStore(), 288);
+        assertEquals(288, queue.size());
+        assertEquals(Collections.singletonList("r1"), queue.peek(1));
+    }
+
+    @Test
+    public void peekOnEmptyAndNonPositive() {
+        HealthQueue empty = new HealthQueue(new MemoryStore(), HealthQueue.MAX);
+        assertEquals(Collections.emptyList(), empty.peek(5));
+        HealthQueue queue = fill(new MemoryStore(), 3);
+        assertEquals(Collections.emptyList(), queue.peek(0));
+        assertEquals(Collections.emptyList(), queue.peek(-1));
+    }
+
+    @Test
+    public void reloadAfterRemove() {
+        MemoryStore store = new MemoryStore();
+        HealthQueue queue = fill(store, 10);
+        queue.remove(4);
+        HealthQueue reloaded = new HealthQueue(store, HealthQueue.MAX);
+        assertEquals(queue.peek(10), reloaded.peek(10));
+        assertEquals(6, reloaded.size());
+    }
+
+    @Test
+    public void reloadAfterOverflowTrim() {
+        MemoryStore store = new MemoryStore();
+        fill(store, 300);
+        HealthQueue reloaded = new HealthQueue(store, HealthQueue.MAX);
+        assertEquals(288, reloaded.size());
+        assertEquals(Collections.singletonList("r13"), reloaded.peek(1));
+    }
+
+    @Test
+    public void removeSentSurvivesOverflowRace() {
+        HealthQueue queue = fill(new MemoryStore(), 288);
+        List<String> peeked = queue.peek(50);
+        queue.add("r289");
+        assertEquals(49, queue.removeSent(peeked));
+        assertEquals(239, queue.size());
+        assertEquals(Collections.singletonList("r51"), queue.peek(1));
+        List<String> all = queue.peek(300);
+        assertEquals("r289", all.get(all.size() - 1));
+    }
+
+    @Test
+    public void removeSentWithoutRaceRemovesAll() {
+        HealthQueue queue = fill(new MemoryStore(), 120);
+        assertEquals(50, queue.removeSent(queue.peek(50)));
+        assertEquals(Collections.singletonList("r51"), queue.peek(1));
+    }
+
+    @Test
+    public void removeSentWhollyTrimmedRemovesNothing() {
+        HealthQueue queue = fill(new MemoryStore(), 288);
+        List<String> peeked = queue.peek(2);
+        for (int i = 0; i < 5; i++) {
+            queue.add("n" + i);
+        }
+        assertEquals(0, queue.removeSent(peeked));
+        assertEquals(288, queue.size());
+    }
+
+    @Test
+    public void failedSaveRollsBackMemory() {
+        final boolean[] fail = {false};
+        MemoryStore store = new MemoryStore() {
+            @Override
+            public void save(List<String> lines) {
+                if (fail[0]) {
+                    throw new IllegalStateException("disk");
+                }
+                super.save(lines);
+            }
+        };
+        HealthQueue queue = fill(store, 3);
+        fail[0] = true;
+        try {
+            queue.add("x");
+            org.junit.Assert.fail();
+        } catch (IllegalStateException expected) {
+        }
+        try {
+            queue.remove(1);
+            org.junit.Assert.fail();
+        } catch (IllegalStateException expected) {
+        }
+        assertEquals(Arrays.asList("r1", "r2", "r3"), queue.peek(10));
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void nonPositiveMaxRejected() {
+        new HealthQueue(new MemoryStore(), 0);
     }
 }

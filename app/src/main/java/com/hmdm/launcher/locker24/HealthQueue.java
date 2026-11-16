@@ -3,6 +3,9 @@ package com.hmdm.launcher.locker24;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Disk-backed FIFO of health reports. Each report is one line and must not contain newlines.
+ */
 public final class HealthQueue {
     public static final int MAX = 288;
     public static final int BATCH = 50;
@@ -12,6 +15,9 @@ public final class HealthQueue {
     private final List<String> lines = new ArrayList<>();
 
     public HealthQueue(QueueStore store, int max) {
+        if (max <= 0) {
+            throw new IllegalArgumentException("max must be positive");
+        }
         this.store = store;
         this.max = max;
         List<String> loaded = store.load();
@@ -29,9 +35,10 @@ public final class HealthQueue {
         if (report == null || report.trim().isEmpty()) {
             return;
         }
+        List<String> before = new ArrayList<>(lines);
         lines.add(report);
         trim();
-        store.save(lines);
+        persist(before);
     }
 
     public synchronized List<String> peek(int n) {
@@ -43,12 +50,44 @@ public final class HealthQueue {
         if (count == 0) {
             return;
         }
+        List<String> before = new ArrayList<>(lines);
         lines.subList(0, count).clear();
-        store.save(lines);
+        persist(before);
+    }
+
+    /**
+     * Removes the sent reports that are still at the head of the queue. Reports of {@code sent}
+     * that were trimmed off the head in the meantime are skipped. Returns how many were removed.
+     */
+    public synchronized int removeSent(List<String> sent) {
+        if (sent == null || sent.isEmpty() || lines.isEmpty()) {
+            return 0;
+        }
+        int start = sent.indexOf(lines.get(0));
+        if (start < 0) {
+            return 0;
+        }
+        int count = 0;
+        while (start + count < sent.size() && count < lines.size()
+                && lines.get(count).equals(sent.get(start + count))) {
+            count++;
+        }
+        remove(count);
+        return count;
     }
 
     public synchronized int size() {
         return lines.size();
+    }
+
+    private void persist(List<String> before) {
+        try {
+            store.save(new ArrayList<>(lines));
+        } catch (RuntimeException e) {
+            lines.clear();
+            lines.addAll(before);
+            throw e;
+        }
     }
 
     private void trim() {

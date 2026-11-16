@@ -24,8 +24,12 @@ public final class HealthSchedule {
     }
 
     public static boolean isDue(long now, long lastCollectAt, int intervalMin) {
+        return isDue(now, lastCollectAt, intervalMin, TOLERANCE_MS);
+    }
+
+    public static boolean isDue(long now, long lastCollectAt, int intervalMin, long toleranceMs) {
         return lastCollectAt == 0
                 || now < lastCollectAt
-                || now - lastCollectAt >= intervalMin * 60_000L - TOLERANCE_MS;
+                || now - lastCollectAt >= intervalMin * 60_000L - toleranceMs;
     }
 }

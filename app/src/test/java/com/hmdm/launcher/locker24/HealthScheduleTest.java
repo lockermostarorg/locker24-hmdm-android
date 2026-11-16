@@ -32,4 +32,17 @@ public class HealthScheduleTest {
         assertEquals(30_000L, HealthSchedule.TRIGGER_DEBOUNCE_MS);
         assertEquals(60_000L, HealthSchedule.KIOSK_DEBOUNCE_MS);
     }
+
+    @Test
+    public void customToleranceBoundaries() {
+        assertFalse(HealthSchedule.isDue(LAST + 59_999, LAST, 5, 240_000));
+        assertTrue(HealthSchedule.isDue(LAST + 60_000, LAST, 5, 240_000));
+        assertEquals(HealthSchedule.isDue(LAST + 285_000, LAST, 5),
+                HealthSchedule.isDue(LAST + 285_000, LAST, 5, 15_000));
+    }
+
+    @Test
+    public void intervalTrimsWhitespace() {
+        assertEquals(7, HealthSchedule.intervalMinutes(" 7 "));
+    }
 }
