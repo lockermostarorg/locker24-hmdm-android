@@ -363,6 +363,7 @@ public class MainActivity
                 ", action: " + intent.getAction() : ""));
         RemoteLogger.log(this, Const.LOG_DEBUG, "MainActivity onCreate: requested=" + getRequestedOrientation()
                 + ", restored=" + (savedInstanceState != null) + ", " + Utils.orientationDiag(this));
+        ProUtils.applyConfiguredOrientation(this, "launcher created");
         if (intent != null && "android.app.action.PROVISIONING_SUCCESSFUL".equalsIgnoreCase(intent.getAction())) {
             firstStartAfterProvisioning = true;
         }
@@ -611,6 +612,9 @@ public class MainActivity
     }
 
     private void lockOrientation() {
+        if (ProUtils.applyConfiguredOrientation(this, "config update")) {
+            return;
+        }
         int orientation = getResources().getConfiguration().orientation;
         int rotation = getWindowManager().getDefaultDisplay().getRotation();
         Log.d(Const.LOG_TAG, "Lock orientation: orientation=" + orientation + ", rotation=" + rotation);

@@ -33,6 +33,7 @@ import android.os.Looper;
 import android.util.Log;
 import android.view.View;
 
+import com.hmdm.launcher.BuildConfig;
 import com.hmdm.launcher.Const;
 import com.hmdm.launcher.R;
 import com.hmdm.launcher.helper.SettingsHelper;
@@ -40,6 +41,7 @@ import com.hmdm.launcher.json.ServerConfig;
 import com.hmdm.launcher.locker24.KioskPolicy;
 import com.hmdm.launcher.locker24.KioskState;
 import com.hmdm.launcher.locker24.Locker24Hooks;
+import com.hmdm.launcher.locker24.OrientationPolicy;
 import com.hmdm.launcher.util.LegacyUtils;
 import com.hmdm.launcher.util.RemoteLogger;
 import com.hmdm.launcher.util.Utils;
@@ -65,6 +67,38 @@ public class ProUtils {
             return KioskPolicy.kioskRequired(config.getKioskMode(), config.getMainApp());
         } catch (RuntimeException e) {
             logError(context, "kioskModeRequired failed", e);
+            return false;
+        }
+    }
+
+    private static boolean isLocker24() {
+        return "locker24".equals(BuildConfig.FLAVOR);
+    }
+
+    /**
+     * Requests the configured orientation on the launcher activity (locker24 flavor only).
+     * Returns false when there is no configured orientation, so the caller keeps its default behaviour.
+     */
+    public static boolean applyConfiguredOrientation(Activity activity, String reason) {
+        if (!isLocker24() || BuildConfig.DISABLE_ORIENTATION_LOCK) {
+            return false;
+        }
+        try {
+            ServerConfig config = SettingsHelper.getInstance(activity).getConfig();
+            int target = OrientationPolicy.requestedOrientation(config != null ? config.getOrientation() : null);
+            if (target == OrientationPolicy.NOT_CONFIGURED) {
+                return false;
+            }
+            int current = activity.getRequestedOrientation();
+            if (OrientationPolicy.needsRequest(current, target)) {
+                activity.setRequestedOrientation(target);
+                RemoteLogger.log(activity, Const.LOG_DEBUG, "Orientation applied (" + reason + "): "
+                        + OrientationPolicy.name(target) + ", was " + OrientationPolicy.name(current)
+                        + ", " + Utils.orientationDiag(activity));
+            }
+            return true;
+        } catch (RuntimeException e) {
+            logError(activity, "applyConfiguredOrientation failed", e);
             return false;
         }
     }
@@ -227,6 +261,7 @@ public class ProUtils {
                 Log.w(Const.LOG_TAG, "setStatusBarDisabled returned false");
                 RemoteLogger.log(activity, Const.LOG_WARN, "setStatusBarDisabled returned false");
             }
+            applyConfiguredOrientation(activity, "kiosk start");
             boolean kioskRunning = isKioskModeRunning(activity);
             if (!kioskRunning) {
                 intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK);
