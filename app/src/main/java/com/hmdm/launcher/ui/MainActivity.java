@@ -1534,6 +1534,9 @@ public class MainActivity
 
     @Override
     public void onConfigUpdateServerError(String errorText) {
+        if (isDestroyed()) {
+            return;
+        }
         if ( enterDeviceIdDialog != null ) {
             enterDeviceIdDialogBinding.setError( true );
             enterDeviceIdDialog.show();
@@ -1545,6 +1548,9 @@ public class MainActivity
 
     @Override
     public void onConfigUpdateNetworkError(String errorText) {
+        if (isDestroyed()) {
+            return;
+        }
         if (ProUtils.isKioskModeRunning(this) && settingsHelper.getConfig() != null &&
                 !getPackageName().equals(settingsHelper.getConfig().getMainApp())) {
             interruptResumeFlow = true;
@@ -1596,7 +1602,7 @@ public class MainActivity
 
     @Override
     public void onFileDownloadError(RemoteFile remoteFile) {
-        if (!ProUtils.kioskModeRequired(this) && !isContentShown()) {
+        if (!isDestroyed() && !ProUtils.kioskModeRequired(this) && !isContentShown()) {
             // Notify the error dialog that we're downloading a file, not an app
             downloadingFile = true;
             createAndShowFileNotDownloadedDialog(remoteFile.getUrl());
@@ -1610,7 +1616,7 @@ public class MainActivity
 
     @Override
     public void onFileInstallError(RemoteFile remoteFile) {
-        if (!ProUtils.kioskModeRequired(MainActivity.this) && !isContentShown()) {
+        if (!isDestroyed() && !ProUtils.kioskModeRequired(MainActivity.this) && !isContentShown()) {
             try {
                 new AlertDialog.Builder(MainActivity.this)
                         .setMessage(getString(R.string.file_create_error) + " " + remoteFile.getPath())
@@ -1652,7 +1658,7 @@ public class MainActivity
 
     @Override
     public void onAppDownloadError(Application application) {
-        if (!ProUtils.kioskModeRequired(MainActivity.this) && !isContentShown()) {
+        if (!isDestroyed() && !ProUtils.kioskModeRequired(MainActivity.this) && !isContentShown()) {
             // Notify the error dialog that we're downloading an app
             downloadingFile = false;
             createAndShowFileNotDownloadedDialog(application.getName());
@@ -1669,7 +1675,7 @@ public class MainActivity
         handler.post(new Runnable() {
             @Override
             public void run() {
-                if (!ProUtils.kioskModeRequired(MainActivity.this) && !isContentShown()) {
+                if (!isDestroyed() && !ProUtils.kioskModeRequired(MainActivity.this) && !isContentShown()) {
 
                     try {
                         new AlertDialog.Builder(MainActivity.this)
@@ -1702,6 +1708,13 @@ public class MainActivity
 
     @Override
     public void onConfigUpdateComplete() {
+        if (isDestroyed()) {
+            MainActivity live = liveInstance();
+            if (live != null) {
+                live.onConfigUpdateComplete();
+            }
+            return;
+        }
         SharedPreferences preferences = getApplicationContext().getSharedPreferences(Const.PREFERENCES, MODE_PRIVATE);
         String deviceAdminLog = PreferenceLogger.getLogString(preferences);
         if (deviceAdminLog != null && !deviceAdminLog.equals("")) {
@@ -1715,6 +1728,13 @@ public class MainActivity
 
     @Override
     public void onAllAppInstallComplete() {
+        if (isDestroyed()) {
+            MainActivity live = liveInstance();
+            if (live != null) {
+                live.onAllAppInstallComplete();
+            }
+            return;
+        }
         Log.i(Const.LOG_TAG, "Refreshing content - new apps installed");
         settingsHelper.refreshConfig(this);         // Avoid NPE in showContent()
         handler.post(new Runnable() {
@@ -1723,6 +1743,12 @@ public class MainActivity
                 showContent(settingsHelper.getConfig());
             }
         });
+    }
+
+    // A flow started by an instance destroyed since then reports its completion to the current one
+    private MainActivity liveInstance() {
+        MainActivity live = currentActivity;
+        return live != null && live != this && !live.isDestroyed() ? live : null;
     }
 
     @Override

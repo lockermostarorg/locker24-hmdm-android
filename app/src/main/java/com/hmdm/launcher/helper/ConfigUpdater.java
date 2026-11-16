@@ -30,6 +30,7 @@ import com.hmdm.launcher.json.Download;
 import com.hmdm.launcher.json.PushMessage;
 import com.hmdm.launcher.json.RemoteFile;
 import com.hmdm.launcher.json.ServerConfig;
+import com.hmdm.launcher.locker24.ConfigFlows;
 import com.hmdm.launcher.pro.worker.DetailedInfoWorker;
 import com.hmdm.launcher.server.ServerServiceKeeper;
 import com.hmdm.launcher.service.PushLongPollingService;
@@ -129,6 +130,13 @@ public class ConfigUpdater {
     }
 
     public void updateConfig(final Context context, final UINotifier uiNotifier, final boolean userInteraction) {
+        if (!ConfigFlows.begin(this, context, uiNotifier, userInteraction)) {
+            return;
+        }
+        runConfigUpdate(context, uiNotifier, userInteraction);
+    }
+
+    private void runConfigUpdate(final Context context, final UINotifier uiNotifier, final boolean userInteraction) {
         if ( configInitializing ) {
             Log.i(Const.LOG_TAG, "updateConfig(): configInitializing=true, exiting");
             return;
@@ -159,6 +167,9 @@ public class ConfigUpdater {
                 super.onPostExecute( result );
                 configInitializing = false;
                 Log.i(Const.LOG_TAG, "updateConfig(): set configInitializing=false after getting config");
+                if (ConfigFlows.superseded(ConfigUpdater.this, context, "applying the configuration")) {
+                    return;
+                }
 
                 switch ( result ) {
                     case Const.TASK_SUCCESS:
@@ -171,13 +182,14 @@ public class ConfigUpdater {
                             uiNotifier.onConfigUpdateServerError(getErrorText());
                         }
                         lockBackOnFailure();
+                        ConfigFlows.end(ConfigUpdater.this);
                         break;
                     case Const.TASK_NETWORK_ERROR:
                         RemoteLogger.log(context, Const.LOG_WARN, "Failed to update config: network error");
                         if (retryCount > 0) {
                             // Retry the request because WiFi may not yet be initialized
                             retryCount--;
-                            handler.postDelayed(() -> updateConfig(context, uiNotifier, userInteraction), retryDelay);
+                            handler.postDelayed(() -> runConfigUpdate(context, uiNotifier, userInteraction), retryDelay);
                         } else {
                             if (settingsHelper.getConfig() != null && !userInteraction) {
                                 if (uiNotifier != null && settingsHelper.getConfig().isShowWifi()) {
@@ -186,6 +198,7 @@ public class ConfigUpdater {
                                     // so the user can set up WiFi even in kiosk mode
                                     uiNotifier.onConfigUpdateNetworkError(getErrorText());
                                     lockBackOnFailure();
+                                    ConfigFlows.end(ConfigUpdater.this);
                                 } else {
                                     updateRemoteLogConfig();
                                 }
@@ -194,6 +207,7 @@ public class ConfigUpdater {
                                     uiNotifier.onConfigUpdateNetworkError(getErrorText());
                                 }
                                 lockBackOnFailure();
+                                ConfigFlows.end(ConfigUpdater.this);
                             }
                         }
                         break;
@@ -207,6 +221,9 @@ public class ConfigUpdater {
     }
 
     public void skipConfigLoad() {
+        if (!ConfigFlows.begin(this, context, uiNotifier, userInteraction)) {
+            return;
+        }
         updateRemoteLogConfig();
     }
 
@@ -234,6 +251,7 @@ public class ConfigUpdater {
                     checkServerMigration();
                 } else {
                     Log.d(Const.LOG_TAG, "LoadOnly flag set, finishing the update flow");
+                    ConfigFlows.end(ConfigUpdater.this);
                 }
                 // If loadOnly flag is set, we finish the flow here
             }
@@ -263,7 +281,7 @@ public class ConfigUpdater {
                             settingsHelper.setServerProject(migrationHelper.getServerProject());
                             ServerServiceKeeper.resetServices();
                             configInitializing = false;
-                            updateConfig(context, uiNotifier, false);
+                            runConfigUpdate(context, uiNotifier, false);
                         }
 
                         @Override
@@ -494,6 +512,9 @@ public class ConfigUpdater {
     }
 
     private void loadAndInstallFiles() {
+        if (ConfigFlows.superseded(this, context, "updating files")) {
+            return;
+        }
         boolean isGoodNetworkForUpdate = userInteraction || checkUpdateNetworkRestriction(settingsHelper.getConfig(), context);
         if (filesForInstall.size() > 0 && !isGoodNetworkForUpdate) {
             RemoteLogger.log(context, Const.LOG_DEBUG, "Updating files not enabled: waiting for WiFi connection");
@@ -780,6 +801,9 @@ public class ConfigUpdater {
 
     // Here we avoid ConcurrentModificationException by executing all operations with applicationForInstall list in a main thread
     private void loadAndInstallApplications() {
+        if (ConfigFlows.superseded(this, context, "updating applications")) {
+            return;
+        }
         boolean isGoodTimeForAppUpdate = userInteraction || checkAppUpdateTimeRestriction(settingsHelper.getConfig());
         if (applicationsForInstall.size() > 0 && !isGoodTimeForAppUpdate) {
             RemoteLogger.log(context, Const.LOG_DEBUG, "Application update not enabled. Scheduled time: " + settingsHelper.getConfig().getAppUpdateFrom());
@@ -1007,6 +1031,7 @@ public class ConfigUpdater {
                 context.sendBroadcast(intent);
 
                 RemoteLogger.log(context, Const.LOG_VERBOSE, "Update flow completed");
+                ConfigFlows.end(ConfigUpdater.this);
                 if (pendingInstallations.size() > 0) {
                     // Some apps are still pending installation
                     // Let's wait until they're all installed
