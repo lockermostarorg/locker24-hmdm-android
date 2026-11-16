@@ -58,6 +58,9 @@ public class RemoteLogWorker extends Worker {
 
     private static boolean uploadScheduled = false;
 
+    // A replaced (cancelled) worker keeps running doWork(), so two workers may drain the table at once
+    private static final Object UPLOAD_LOCK = new Object();
+
     private Context context;
     private SettingsHelper settingsHelper;
 
@@ -94,6 +97,12 @@ public class RemoteLogWorker extends Worker {
     @Override
     // This is running in a background thread by WorkManager
     public Result doWork() {
+        synchronized (UPLOAD_LOCK) {
+            return drainLogs();
+        }
+    }
+
+    private Result drainLogs() {
         try {
             DatabaseHelper dbHelper = DatabaseHelper.instance(context);
 
