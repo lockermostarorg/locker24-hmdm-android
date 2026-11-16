@@ -67,7 +67,7 @@ public class LogTable {
     public static void deleteOldItems(SQLiteDatabase db) {
         long oldTs = System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L;
         try {
-            db.execSQL(DELETE_FROM_LOGS, new String[]{
+            db.execSQL(DELETE_OLD_LOGS, new String[]{
                     Long.toString(oldTs)
             });
         } catch (SQLException e) {
