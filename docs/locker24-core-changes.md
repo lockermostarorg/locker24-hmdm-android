@@ -53,15 +53,15 @@ A flow holds the process-wide gate from `ConfigFlows.begin` until `ConfigFlows.e
 
 ## What `forceAppUpdate` changes
 
-Push payload: `{"apps":[{"pkg":"...","version":"..."}],"issuedAt":<epoch ms>}`. `ForcedApps.parse` returns an empty set (and the agent runs a normal `configUpdated` flow) when the payload is missing, malformed, has no valid app entry, or `issuedAt` is older than 60 minutes by the device clock; a device clock before 2020 counts the payload as fresh.
+Push payload (a string for polled pushes, or a raw JSON object over MQTT; `ForceAppUpdate.payloadText` accepts both): `{"apps":[{"pkg":"...","version":"..."}],"issuedAt":<epoch ms>}`. `ForcedApps.parse` returns an empty set (and the agent runs a normal `configUpdated` flow) when the payload is missing, malformed, has no valid app entry, or `issuedAt` is older than 60 minutes by the device clock; a device clock before 2020 counts the payload as fresh.
 
-The set travels with the request through `ConfigUpdater.updateConfig(..., forcedApps)` and `ConfigFlows`; the gate merges requests by union (a plain `configUpdated` merges in an empty set). `userInteraction` stays `false`, so none of its side effects apply (back-off on failed installs, network-error dialog and flow end, file Wi-Fi rule).
+The set travels with the request through `ConfigUpdater.updateConfig(..., forcedApps)` and `ConfigFlows`; the gate merges requests by union (a plain `configUpdated` merges in an empty set). `userInteraction` stays `false`, so its other side effects (network-error dialog and flow end, file Wi-Fi rule) do not apply.
 
 | Place | Behaviour |
 |---|---|
-| `loadAndInstallApplications` | Per app, `ForcedApps.mayRun`: an app installs now when the window and Wi-Fi rules pass, or when it is not a removal and its package and configured version (from the freshly fetched configuration) match an entry. Every other install, update or removal waits for the window and Wi-Fi exactly as before. The first runnable app is moved to the head of the list; if none is runnable the step ends as before. |
+| `loadAndInstallApplications` | Per app, `ForcedApps.mayRun`: an app installs now when the window and Wi-Fi rules pass, or when it is not a removal and its package and configured version (from the freshly fetched configuration) match an entry. Every other install, update or removal waits for the window and Wi-Fi exactly as before. The next app is chosen by `AppInstallOrder.nextIndex` and moved to the head of the list; the agent's own package goes last among the runnable apps (installing it restarts the process). If none is runnable the step ends as before. |
 | Agent self-update | Goes through the same list, so it is forced only when the agent's own package and version are in the set. |
 | `loadAndInstallFiles` | Unchanged: files obey the Wi-Fi rule. |
-| `canDownload` | Unchanged. |
+| `canDownload` (apps) | A forced app (package and version match) skips the failed-install block and the limited-download rule, once per forced push: a failed forced install is skipped for the rest of the flow, and the next forced push retries it. A normal flow still honours the block. Files: unchanged. |
 
 With the launcher not running, `configUpdated` and the force push share the BACKGROUND gate key and merge into one flow. With `MainActivity` running, `configUpdated` runs under the activity's key and the force flow is queued under BACKGROUND and runs after it (a redundant config fetch, and no completion refresh of `MainActivity`, as with `PluginApiService.forceConfigUpdate`).

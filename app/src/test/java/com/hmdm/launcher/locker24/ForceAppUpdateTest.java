@@ -7,6 +7,9 @@ import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 import com.hmdm.launcher.json.PushMessage;
+import com.hmdm.launcher.json.PushMessageJson;
+
+import org.json.JSONObject;
 
 import org.junit.Test;
 
@@ -166,5 +169,31 @@ public class ForceAppUpdateTest {
         Req next = gate.finish(updater);
         assertSame(forceUpdater, next.flow);
         assertTrue(next.forced.matches("kiosk", "2.1.0"));
+    }
+
+    @Test public void mqttPushWithAJsonObjectPayloadCarriesTheForcedApps() throws Exception {
+        JSONObject envelope = new JSONObject("{\"messageType\":\"forceAppUpdate\",\"payload\":"
+                + payload("kiosk", "2.1.0", NOW - 1000) + "}");
+        PushMessageJson message = new PushMessageJson(envelope.getString("messageType"),
+                envelope.optJSONObject("payload"));
+        Recorder recorder = new Recorder();
+        assertTrue(ForceAppUpdate.handle(message, NOW, recorder));
+        assertEquals(0, recorder.normal);
+        assertTrue(recorder.forced.get(0).matches("kiosk", "2.1.0"));
+    }
+
+    @Test public void mqttPushWithoutAPayloadStartsANormalUpdate() throws Exception {
+        JSONObject envelope = new JSONObject("{\"messageType\":\"forceAppUpdate\"}");
+        PushMessageJson message = new PushMessageJson(envelope.getString("messageType"),
+                envelope.optJSONObject("payload"));
+        Recorder recorder = new Recorder();
+        assertTrue(ForceAppUpdate.handle(message, NOW, recorder));
+        assertEquals(1, recorder.normal);
+    }
+
+    @Test public void stringPayloadStillWorks() {
+        Recorder recorder = new Recorder();
+        ForceAppUpdate.handle(message("forceAppUpdate", payload("kiosk", "2.1.0", NOW)), NOW, recorder);
+        assertEquals(1, recorder.forced.size());
     }
 }

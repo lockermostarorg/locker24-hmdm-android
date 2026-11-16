@@ -30,6 +30,7 @@ import com.hmdm.launcher.json.Download;
 import com.hmdm.launcher.json.PushMessage;
 import com.hmdm.launcher.json.RemoteFile;
 import com.hmdm.launcher.json.ServerConfig;
+import com.hmdm.launcher.locker24.AppInstallOrder;
 import com.hmdm.launcher.locker24.ConfigFlows;
 import com.hmdm.launcher.locker24.ForcedApps;
 import com.hmdm.launcher.pro.worker.DetailedInfoWorker;
@@ -52,6 +53,7 @@ import org.apache.commons.io.FileUtils;
 import java.io.File;
 import java.io.IOException;
 import java.net.URL;
+import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.GregorianCalendar;
@@ -569,7 +571,7 @@ public class ConfigUpdater {
 
                         DatabaseHelper dbHelper = DatabaseHelper.instance(context);
                         Download lastDownload = DownloadTable.selectByPath(dbHelper.getReadableDatabase(), remoteFile.getPath());
-                        if (!canDownload(lastDownload, remoteFile.getPath())) {
+                        if (!canDownload(lastDownload, remoteFile.getPath(), false)) {
                             // Do not make further attempts to download if there were earlier download or installation errors
                             return remoteFileStatus;
                         }
@@ -734,8 +736,8 @@ public class ConfigUpdater {
     // In background mode, we do not attempt to download files or apps in two cases:
     // 1. Installation failed
     // 2. Downloading in a mobile network is limited
-    private boolean canDownload(Download lastDownload, String objectId) {
-        if (userInteraction || lastDownload == null) {
+    private boolean canDownload(Download lastDownload, String objectId, boolean forced) {
+        if (userInteraction || forced || lastDownload == null) {
             return true;
         }
         if (lastDownload.isDownloaded() && !lastDownload.isInstalled()) {
@@ -812,6 +814,29 @@ public class ConfigUpdater {
         public boolean installed;
     }
 
+    private List<AppInstallOrder.Item> installItems() {
+        List<AppInstallOrder.Item> items = new ArrayList<>();
+        for (final Application application : applicationsForInstall) {
+            items.add(new AppInstallOrder.Item() {
+                @Override
+                public String pkg() {
+                    return application.getPkg();
+                }
+
+                @Override
+                public String version() {
+                    return application.getVersion();
+                }
+
+                @Override
+                public boolean remove() {
+                    return application.isRemove();
+                }
+            });
+        }
+        return items;
+    }
+
     // Here we avoid ConcurrentModificationException by executing all operations with applicationForInstall list in a main thread
     private void loadAndInstallApplications() {
         if (stopIfSuperseded("updating applications")) {
@@ -819,15 +844,8 @@ public class ConfigUpdater {
         }
         boolean isGoodTimeForAppUpdate = userInteraction || checkAppUpdateTimeRestriction(settingsHelper.getConfig());
         boolean isGoodNetworkForUpdate = userInteraction || checkUpdateNetworkRestriction(settingsHelper.getConfig(), context);
-        int nextIndex = -1;
-        for (int i = 0; i < applicationsForInstall.size(); i++) {
-            Application candidate = applicationsForInstall.get(i);
-            if (ForcedApps.mayRun(forcedApps, candidate.getPkg(), candidate.getVersion(), candidate.isRemove(),
-                    isGoodTimeForAppUpdate, isGoodNetworkForUpdate)) {
-                nextIndex = i;
-                break;
-            }
-        }
+        int nextIndex = AppInstallOrder.nextIndex(installItems(), forcedApps, isGoodTimeForAppUpdate,
+                isGoodNetworkForUpdate, context.getPackageName());
         if (applicationsForInstall.size() > 0 && nextIndex < 0) {
             if (!isGoodTimeForAppUpdate) {
                 RemoteLogger.log(context, Const.LOG_DEBUG, "Application update not enabled. Scheduled time: " + settingsHelper.getConfig().getAppUpdateFrom());
@@ -913,7 +931,7 @@ public class ConfigUpdater {
                         DatabaseHelper dbHelper = DatabaseHelper.instance(context);
                         String tempPath = InstallUtils.getAppTempPath(context, application.getUrl());
                         Download lastDownload = DownloadTable.selectByPath(dbHelper.getReadableDatabase(), tempPath);
-                        if (!canDownload(lastDownload, application.getPkg())) {
+                        if (!canDownload(lastDownload, application.getPkg(), forcedApps.matches(application.getPkg(), application.getVersion()))) {
                             // Do not make further attempts to download if there were earlier download or installation errors
                             applicationStatus.installed = false;
                             return applicationStatus;
