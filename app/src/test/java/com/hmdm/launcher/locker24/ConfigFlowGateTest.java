@@ -87,6 +87,31 @@ public class ConfigFlowGateTest {
         assertEquals(ConfigFlowGate.Decision.START, gate.request(new Req(launcher, launcher, false), T + 20));
     }
 
+    @Test public void configUpdatedThenForceRunsOneFlowWithUserInteraction() {
+        ConfigFlowGate<Req> gate = gate();
+        Object background = new Object();
+        Object flow = new Object();
+        assertEquals(ConfigFlowGate.Decision.START, gate.request(new Req(flow, background, false), T));
+        assertEquals(ConfigFlowGate.Decision.COALESCE, gate.request(new Req(flow, background, false), T + 1));
+        assertEquals(ConfigFlowGate.Decision.COALESCE, gate.request(new Req(flow, background, true), T + 2));
+
+        Req rerun = gate.finish(flow);
+        assertTrue(rerun.userInteraction);
+        assertEquals(ConfigFlowGate.Decision.START, gate.request(rerun, T + 3));
+        assertNull(gate.finish(flow));
+        assertNull(gate.takeNext());
+    }
+
+    @Test public void forceThenConfigUpdatedKeepsUserInteraction() {
+        ConfigFlowGate<Req> gate = gate();
+        Object background = new Object();
+        Object flow = new Object();
+        gate.request(new Req(flow, background, false), T);
+        gate.request(new Req(flow, background, true), T + 1);
+        gate.request(new Req(flow, background, false), T + 2);
+        assertTrue(gate.finish(flow).userInteraction);
+    }
+
     @Test public void requestsFromDifferentListenersRunOneAfterAnother() {
         ConfigFlowGate<Req> gate = gate();
         Object launcher = new Object();

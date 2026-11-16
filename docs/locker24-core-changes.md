@@ -22,6 +22,8 @@ The fork is ours. Upstream bugs are fixed in core files even when the fix change
 | `util/PushNotificationMqttWrapper.java` | Adds `isConnected()`. | The health report includes the MQTT connection state. | **both flavors** |
 | `worker/RemoteLogWorker.java` | `uploadScheduled` is volatile. `doWork` drains through `locker24/LogDrain`: one drain at a time (a second worker returns at once), a failed delete ends the drain, and rows written after the last empty select schedule another upload. | `scheduleUpload` uses `REPLACE` and `MainActivity.startServices` resets the scheduled flag on every resume; a replaced worker keeps running, so two workers uploaded the same rows (2-3 copies on the server). A blocking lock would tie up WorkManager threads. | **both flavors** |
 | `db/LogTable.java` | `delete` returns whether the transaction succeeded; `deleteOldItems` uses `DELETE_OLD_LOGS`. | The drain must stop when uploaded rows cannot be deleted. Old logs were never purged because the purge ran the delete-by-id statement with a timestamp. | **both flavors** |
+| `json/PushMessage.java` | Adds `TYPE_FORCE_APP_UPDATE = "forceAppUpdate"`. | The server sends it after moving configurations to a new app version with mode "immediate". | **both flavors** |
+| `worker/PushNotificationProcessor.java` | Routes `forceAppUpdate` to `locker24/ForceAppUpdate`, which runs `ConfigUpdater.forceConfigUpdate(context, null, true)`. | Installs pending app updates at once, ignoring the update window. No notifier is passed, so nothing shows UI on the kiosk. The flag is OR-ed with a queued `configUpdated` flow by `ConfigFlows`. | **both flavors** |
 
 ## AIDL method order
 
@@ -48,3 +50,18 @@ A flow holds the process-wide gate from `ConfigFlows.begin` until `ConfigFlows.e
 | MainActivity dialogs without kiosk mode (file/app error, install error), including dialogs dismissed in `onPause` | continues when the user answers; otherwise a stall |
 | Superseded flow at a stop point | stops; it no longer owns the gate |
 | Stall of any kind | released by the expiry 10 min after `begin`, then the next queued request runs; a later request also takes over a stale flow or one whose launcher instance is destroyed |
+
+## What `userInteraction = true` changes
+
+The `forceAppUpdate` push runs the update with `userInteraction = true` and no notifier. Everything the flag changes in `ConfigUpdater`:
+
+| Place | Effect with `true` | Judgement for a kiosk |
+|---|---|---|
+| `loadAndInstallApplications` | Ignores the update window (`checkAppUpdateTimeRestriction`). | The purpose of the push. |
+| `loadAndInstallApplications`, `loadAndInstallFiles` | Ignores the Wi-Fi-only restriction (`checkUpdateNetworkRestriction`). | Harmless: kiosks are on Wi-Fi; on mobile data the one-off download is what the operator asked for. |
+| `canDownload` | Ignores the previous-install-failure skip and the limited-download rule, so a failed APK is retried. | Harmless: one retry per push, bounded by the gate; the push only follows a new version. |
+| Config fetch, network error with no retries left | Ends the flow (`lockBackOnFailure`, `ConfigFlows.end`) instead of continuing with the stored configuration. | Harmless: with no connection nothing can be downloaded; the next configUpdated or periodic update continues normally. |
+| Same place, with a notifier | Shows the network error dialog. | Not reachable: this push passes no notifier. |
+| `checkServerMigration` success | Re-runs with `userInteraction = false`. | Not affected. |
+
+All 21 `uiNotifier` call sites are guarded by `uiNotifier != null`, so a null notifier is safe (it is what `notifyConfigUpdate` passes when the launcher is not running). With a null notifier the "run after install" apps start at once after install, as in any background update. `forceConfigUpdate` is used instead of the launcher broadcast so a running `MainActivity` does not show its progress UI.
