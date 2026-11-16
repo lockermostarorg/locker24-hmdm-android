@@ -106,4 +106,15 @@ The pilot tablet must pass the checklist from the plan (Task 9), with these addi
 9. Set `reboot_time` 3 min ahead: the tablet reboots once, and not again that day. The tablet must have been up for at least 1 hour: the agent never does a scheduled reboot in the first hour after boot.
 10. On the tablet, Settings > General management > Date and time shows `Europe/Sarajevo` (Central European time), and the scheduled reboot in step 9 happens at the configured local time, not shifted by an hour or more.
 
+### Health checks (agent 6.40-l24.5 and later)
+
+These mirror the canonical H1-H6 in the server repo's `docs/locker24-health.md`; change them there first. Read the results on Functions -> Fleet health.
+
+- **H1. Report arrives.** Within 5 minutes of the agent update the tablet shows on Fleet health with model SM-X110, battery, temperature and both versions (agent `6.40-l24.5`, kiosk app). After a few hours the 24 h history charts render battery, temperature, RSSI and offline periods.
+- **H2. Offline turns red and recovers.** Wi-Fi off for 15 minutes. The tablet turns red `offline` 10-11 minutes after its last report and a pop-up alert appears (the webhook receives `raised` if one is set). Wi-Fi on: the queued reports arrive, the history shows the gap as an offline period with points inside it, and the status turns green after a real report.
+- **H3. Kiosk-app keys.** After PostBox publishes its values, the row shows the kiosk-app keys: `locker_short_uid` equals the locker set in the kiosk app, and after a PIN unlock attempt the last successful API call moves.
+- **H4. Alert raised and cleared.** The offline alert of H2 clears about 5 minutes after the first real report. Unplug the charger: yellow `not_charging` within about 2 minutes and an alert after 30 minutes non-green; replug: green, and the alert clears about 5 minutes later.
+- **H5. Admin exit of the kiosk.** Push `exitKiosk`: yellow "Kiosk off (admin)" within about 3 minutes (30 s tick, 60 s debounce, 1 min evaluation) and NO alert. Start the kiosk again: green. An accidental loss of lock task (not admin) still turns red `kiosk_not_running` (after 2 consecutive fresh reports) and alerts.
+- **H6. Update gap does not go red.** Publish a kiosk app update (or reinstall the same version) while watching: the 5-10 second gap while the app is replaced must NOT turn the tablet red or raise an alert, and a scheduled update window must not leave it yellow or alerting before the window has had its chance.
+
 Any failure goes back to the owning task as a bug, with the logcat lines.
