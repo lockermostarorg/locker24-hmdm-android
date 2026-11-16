@@ -242,4 +242,41 @@ public class KioskStartPolicyTest {
         assertTrue(KioskStartPolicy.freshStartRecent(10_000, 10_000 + KioskStartPolicy.RECENT_FRESH_START_MS - 1));
         assertFalse(KioskStartPolicy.freshStartRecent(10_000, 10_000 + KioskStartPolicy.RECENT_FRESH_START_MS));
     }
+
+    @Test public void replacedWhileLockReadsLockedIsRechecked() {
+        assertEquals(KioskStartPolicy.ReplaceAction.RECHECK_LOCKED,
+                KioskStartPolicy.onKioskAppReplaced(true, 0, 10_000));
+        assertEquals(KioskStartPolicy.ReplaceAction.RECHECK_LOCKED,
+                KioskStartPolicy.onKioskAppReplaced(true, 9_000, 10_000));
+    }
+
+    @Test public void replacedRightAfterAFreshStartDoesNotRelaunch() {
+        assertEquals(KioskStartPolicy.ReplaceAction.RECHECK_FRESH_START,
+                KioskStartPolicy.onKioskAppReplaced(false, 9_000, 10_000));
+        assertEquals(KioskStartPolicy.ReplaceAction.RECHECK_FRESH_START,
+                KioskStartPolicy.onKioskAppReplaced(false, 10_000, 10_000));
+        assertEquals(KioskStartPolicy.ReplaceAction.RECHECK_FRESH_START,
+                KioskStartPolicy.onKioskAppReplaced(false, 10_000,
+                        10_000 + KioskStartPolicy.RECENT_FRESH_START_MS - 1));
+    }
+
+    @Test public void replacedWithLockGoneAndNoRecentFreshStartRelaunches() {
+        assertEquals(KioskStartPolicy.ReplaceAction.RELAUNCH,
+                KioskStartPolicy.onKioskAppReplaced(false, 0, 10_000));
+        assertEquals(KioskStartPolicy.ReplaceAction.RELAUNCH,
+                KioskStartPolicy.onKioskAppReplaced(false, 10_000,
+                        10_000 + KioskStartPolicy.RECENT_FRESH_START_MS));
+        assertEquals(KioskStartPolicy.ReplaceAction.RELAUNCH,
+                KioskStartPolicy.onKioskAppReplaced(false, 20_000, 10_000));
+    }
+
+    @Test public void updateFlowAtTheLauncherThenPackageBroadcastStartsTheAppOnce() {
+        long freshStartAt = 50_000;
+        long broadcastAt = freshStartAt + 1_000;
+        assertEquals(KioskStartPolicy.ReplaceAction.RECHECK_FRESH_START,
+                KioskStartPolicy.onKioskAppReplaced(false, freshStartAt, broadcastAt));
+        long retryAt = freshStartAt + KioskStartPolicy.RETRY_CHECK_MS;
+        long recheckAt = broadcastAt + 6_000;
+        assertTrue(KioskStartPolicy.freshStartRecent(retryAt, recheckAt));
+    }
 }

@@ -111,18 +111,26 @@ public class KioskWatchdogService extends Service {
                 if (!ProUtils.kioskModeRequired(context) || KioskState.isAdminUnlocked(context)) {
                     return;
                 }
-                if (!ProUtils.isKioskModeRunning(context)) {
+                KioskStartPolicy.ReplaceAction action = KioskStartPolicy.onKioskAppReplaced(
+                        ProUtils.isKioskModeRunning(context), KioskState.getLastFreshStartAt(),
+                        android.os.SystemClock.elapsedRealtime());
+                if (action == KioskStartPolicy.ReplaceAction.RELAUNCH) {
                     safeLog(Const.LOG_INFO, "Kiosk app " + pkg + " changed, relaunching launcher");
                     relaunch();
-                } else {
+                    return;
+                }
+                if (action == KioskStartPolicy.ReplaceAction.RECHECK_LOCKED) {
                     // Lock task can still read LOCKED for a moment after the locked package is replaced
                     safeLog(Const.LOG_INFO, "Kiosk app " + pkg + " changed while lock task reads locked, rechecking in "
                             + (REPLACE_RECHECK_MS / 1000) + " s");
-                    Handler h = handler;
-                    if (h != null) {
-                        h.removeCallbacks(replaceRecheck);
-                        h.postDelayed(replaceRecheck, REPLACE_RECHECK_MS);
-                    }
+                } else {
+                    safeLog(Const.LOG_INFO, "Kiosk app " + pkg + " changed right after a fresh start, not relaunching, "
+                            + "rechecking in " + (REPLACE_RECHECK_MS / 1000) + " s");
+                }
+                Handler h = handler;
+                if (h != null) {
+                    h.removeCallbacks(replaceRecheck);
+                    h.postDelayed(replaceRecheck, REPLACE_RECHECK_MS);
                 }
             } catch (Throwable e) {
                 safeLog(Const.LOG_WARN, "Kiosk package receiver failed: " + e);

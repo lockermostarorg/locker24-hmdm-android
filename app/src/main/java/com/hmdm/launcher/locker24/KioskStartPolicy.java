@@ -77,4 +77,22 @@ public final class KioskStartPolicy {
         return lastFreshStartAt > 0 && nowElapsed >= lastFreshStartAt
                 && nowElapsed - lastFreshStartAt < RECENT_FRESH_START_MS;
     }
+
+    public enum ReplaceAction { RELAUNCH, RECHECK_LOCKED, RECHECK_FRESH_START }
+
+    /**
+     * What the package receiver does when the kiosk app was replaced. A fresh start or retry issued
+     * a moment ago has not engaged lock task yet, so relaunching the launcher now would start the
+     * app a second time; the delayed recheck, the retry check and the watchdog stay as backstops.
+     */
+    public static ReplaceAction onKioskAppReplaced(boolean lockTaskRunning, long lastFreshStartAt,
+                                                   long nowElapsed) {
+        if (lockTaskRunning) {
+            return ReplaceAction.RECHECK_LOCKED;
+        }
+        if (freshStartRecent(lastFreshStartAt, nowElapsed)) {
+            return ReplaceAction.RECHECK_FRESH_START;
+        }
+        return ReplaceAction.RELAUNCH;
+    }
 }
