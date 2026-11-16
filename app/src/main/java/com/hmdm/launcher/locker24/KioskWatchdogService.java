@@ -36,7 +36,7 @@ public class KioskWatchdogService extends Service {
     private static final String SETTING_REBOOT_TIME = "reboot_time";
     private static final String SETTING_SECONDS = "kiosk_watchdog_seconds";
     private static final int LAUNCHER_IN_FRONT_LIMIT = 4;
-    private static final long REPLACE_RECHECK_MS = 3000;
+    private static final long REPLACE_RECHECK_MS = 6000;
 
     private HandlerThread thread;
     private Handler handler;
@@ -100,8 +100,6 @@ public class KioskWatchdogService extends Service {
                 if (pkg == null || !pkg.equals(mainApp())) {
                     return;
                 }
-                ProUtils.onKioskAppInstallEvent(context, pkg,
-                        Intent.ACTION_PACKAGE_REPLACED.equals(intent.getAction()) ? "replaced" : "added");
                 if (!ProUtils.kioskModeRequired(context) || KioskState.isAdminUnlocked(context)) {
                     return;
                 }

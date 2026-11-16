@@ -1634,7 +1634,6 @@ public class MainActivity
 
     @Override
     public void onAppInstalling(final Application application) {
-        ProUtils.onKioskAppInstallEvent(this, application.getPkg(), "installing");
         handler.post( new Runnable() {
             @Override
             public void run() {
@@ -1691,7 +1690,6 @@ public class MainActivity
 
     @Override
     public void onAppInstallComplete(String packageName) {
-        ProUtils.onKioskAppInstallEvent(this, packageName, "installed");
 
     }
 

@@ -2,12 +2,16 @@ package com.hmdm.launcher.locker24;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+
+import com.hmdm.launcher.helper.SettingsHelper;
+import com.hmdm.launcher.json.ServerConfig;
 
 public class KioskState {
     private static final String PREFS = "locker24";
     private static final String KEY_ADMIN_UNLOCKED = "admin_unlocked";
     private static final String KEY_LAST_REBOOT_DATE = "last_reboot_date";
-    private static final String KEY_KIOSK_APP_REPLACED_AT = "kiosk_app_replaced_at";
+    private static final String KEY_HANDLED_KIOSK_UPDATE_TIME = "handled_kiosk_update_time";
 
     private static volatile boolean launcherResumed;
 
@@ -35,21 +39,34 @@ public class KioskState {
         return prefs(context).edit().putString(KEY_LAST_REBOOT_DATE, isoDate).commit();
     }
 
-    /** elapsedRealtime of the last install or replacement of the kiosk app, 0 when none is pending. */
-    public static long getKioskAppReplacedAt(Context context) {
-        return prefs(context).getLong(KEY_KIOSK_APP_REPLACED_AT, 0);
+    public static long getHandledKioskUpdateTime(Context context) {
+        return prefs(context).getLong(KEY_HANDLED_KIOSK_UPDATE_TIME, 0);
     }
 
-    public static synchronized void markKioskAppReplaced(Context context, long elapsedRealtime) {
-        prefs(context).edit().putLong(KEY_KIOSK_APP_REPLACED_AT, elapsedRealtime).commit();
+    public static void setHandledKioskUpdateTime(Context context, long lastUpdateTime) {
+        prefs(context).edit().putLong(KEY_HANDLED_KIOSK_UPDATE_TIME, lastUpdateTime).commit();
     }
 
-    /** Clears the mark only if it was not refreshed since {@code expected} was read. */
-    public static synchronized boolean clearKioskAppReplaced(Context context, long expected) {
-        if (getKioskAppReplacedAt(context) != expected) {
-            return false;
+    /** PackageInfo.lastUpdateTime of the package, 0 when it is not installed. */
+    public static long kioskAppLastUpdateTime(Context context, String packageName) {
+        if (packageName == null) {
+            return 0;
         }
-        return prefs(context).edit().remove(KEY_KIOSK_APP_REPLACED_AT).commit();
+        try {
+            return context.getPackageManager().getPackageInfo(packageName, 0).lastUpdateTime;
+        } catch (PackageManager.NameNotFoundException | RuntimeException e) {
+            return 0;
+        }
+    }
+
+    /** A reboot starts the kiosk app fresh anyway, so the current install needs no forced fresh start. */
+    public static void markCurrentKioskUpdateHandled(Context context) {
+        ServerConfig config = SettingsHelper.getInstance(context).getConfig();
+        String mainApp = config != null ? config.getMainApp() : null;
+        long lastUpdateTime = kioskAppLastUpdateTime(context, mainApp);
+        if (lastUpdateTime > 0) {
+            setHandledKioskUpdateTime(context, lastUpdateTime);
+        }
     }
 
     private static SharedPreferences prefs(Context context) {
