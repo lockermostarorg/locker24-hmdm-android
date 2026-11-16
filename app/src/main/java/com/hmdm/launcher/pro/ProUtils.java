@@ -285,15 +285,23 @@ public class ProUtils {
             if (decision.forcedByUpdate) {
                 RemoteLogger.log(activity, Const.LOG_INFO, "Kiosk start " + kioskApp + " forced fresh: app updated "
                         + ((nowWall - lastUpdateTime) / 1000) + " s ago");
-                KioskState.setLastFreshStartAt(SystemClock.elapsedRealtime());
             }
             KioskState.setAdminUnlocked(activity, false);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                activity.startActivity(intent, ActivityOptions.makeBasic().setLockTaskEnabled(true).toBundle());
-            } else {
-                // API 26-27 cannot start a task in lock task mode via ActivityOptions;
-                // start the app and rely on the allowlist only.
-                activity.startActivity(intent);
+            long previousFreshStartAt = KioskState.getLastFreshStartAt();
+            if (decision.forcedByUpdate) {
+                KioskState.setLastFreshStartAt(SystemClock.elapsedRealtime());
+            }
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    activity.startActivity(intent, ActivityOptions.makeBasic().setLockTaskEnabled(true).toBundle());
+                } else {
+                    // API 26-27 cannot start a task in lock task mode via ActivityOptions;
+                    // start the app and rely on the allowlist only.
+                    activity.startActivity(intent);
+                }
+            } catch (RuntimeException e) {
+                KioskState.setLastFreshStartAt(previousFreshStartAt);
+                throw e;
             }
             if (decision.newHandled != handledUpdate) {
                 KioskState.setHandledKioskUpdateTime(activity, decision.newHandled);
@@ -359,8 +367,14 @@ public class ProUtils {
         RemoteLogger.log(appContext, Const.LOG_WARN, "Kiosk start retry: lock task not engaged after the update start, "
                 + "starting " + kioskApp + " fresh (from " + (useActivity ? "launcher" : "service context") + ", "
                 + Utils.orientationDiag(appContext) + ")");
+        long previousFreshStartAt = KioskState.getLastFreshStartAt();
         KioskState.setLastFreshStartAt(SystemClock.elapsedRealtime());
-        starter.startActivity(intent, ActivityOptions.makeBasic().setLockTaskEnabled(true).toBundle());
+        try {
+            starter.startActivity(intent, ActivityOptions.makeBasic().setLockTaskEnabled(true).toBundle());
+        } catch (RuntimeException e) {
+            KioskState.setLastFreshStartAt(previousFreshStartAt);
+            throw e;
+        }
         scheduleUpdateRetryCheck(appContext, activityRef, kioskApp, true);
         scheduleUpdateSettledCheck(appContext);
     }
