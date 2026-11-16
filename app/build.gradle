@@ -169,8 +169,8 @@ android {
         opensource { }
         locker24 {
             applicationId "app.locker24.mdm"
-            versionCode 1540003
-            versionName "6.40-l24.3"
+            versionCode 1540004
+            versionName "6.40-l24.4"
             buildConfigField("String", "BASE_URL", "\"https://mdm.locker24.app\"")
             buildConfigField("String", "SECONDARY_BASE_URL", "\"https://mdm.locker24.app\"")
             buildConfigField("String", "REQUEST_SIGNATURE", "\"${locker24Props['requestSignature'] ?: ''}\"")
