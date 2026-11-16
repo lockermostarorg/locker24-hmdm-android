@@ -73,9 +73,14 @@ public final class HealthValues {
             if (values == null) {
                 return false;
             }
-            String mainApp = mainApp(context);
-            if (mainApp == null) {
+            ServerConfig config = SettingsHelper.getInstance(context).getConfig();
+            if (config == null) {
                 reject(context, "no config", null);
+                return false;
+            }
+            String mainApp = config.getMainApp();
+            if (mainApp == null) {
+                reject(context, "no main app configured", null);
                 return false;
             }
             String[] packages = context.getPackageManager().getPackagesForUid(callingUid);
@@ -131,11 +136,13 @@ public final class HealthValues {
         return sanitize(raw);
     }
 
+    /** Callers needing both the values and publishedAt must use {@link #snapshot} once. */
     public static Map<String, Object> latest(Context context) {
         Snapshot s = snapshot(context);
         return s == null ? null : s.values;
     }
 
+    /** Callers needing both the values and publishedAt must use {@link #snapshot} once. */
     public static Long publishedAt(Context context) {
         Snapshot s = snapshot(context);
         return s == null ? null : s.publishedAt;
@@ -188,16 +195,19 @@ public final class HealthValues {
     }
 
     private static void reject(Context context, String reason, String detail) {
-        boolean log;
-        synchronized (LAST_LOGGED) {
-            log = shouldLog(LAST_LOGGED, reason, System.currentTimeMillis());
+        try {
+            boolean log;
+            synchronized (LAST_LOGGED) {
+                log = shouldLog(LAST_LOGGED, reason, System.currentTimeMillis());
+            }
+            if (!log) {
+                return;
+            }
+            String message = "publishHealth rejected: " + reason + (detail == null ? "" : " (" + detail + ")");
+            Log.w(Const.LOG_TAG, message);
+            RemoteLogger.log(context, Const.LOG_WARN, message);
+        } catch (Exception ignored) {
         }
-        if (!log) {
-            return;
-        }
-        String message = "publishHealth rejected: " + reason + (detail == null ? "" : " (" + detail + ")");
-        Log.w(Const.LOG_TAG, message);
-        RemoteLogger.log(context, Const.LOG_WARN, message);
     }
 
     private static String mainApp(Context context) {
@@ -217,13 +227,15 @@ public final class HealthValues {
 
     public static Snapshot snapshot(Context context) {
         try {
-            SharedPreferences p = prefs(context);
-            String json = p.getString(KEY_VALUES, null);
-            if (json == null || !isCurrent(p.getString(KEY_PACKAGE, null), mainApp(context))) {
+            Map<String, ?> all = prefs(context).getAll();
+            Object json = all.get(KEY_VALUES);
+            Object pkg = all.get(KEY_PACKAGE);
+            if (!(json instanceof String) || !(pkg instanceof String)
+                    || !isCurrent((String) pkg, mainApp(context))) {
                 return null;
             }
-            Long at = p.contains(KEY_PUBLISHED_AT) ? p.getLong(KEY_PUBLISHED_AT, 0L) : null;
-            return new Snapshot(parse(json), at);
+            Object at = all.get(KEY_PUBLISHED_AT);
+            return new Snapshot(parse((String) json), at instanceof Long ? (Long) at : null);
         } catch (Exception e) {
             return null;
         }

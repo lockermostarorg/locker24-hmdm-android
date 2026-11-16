@@ -25,7 +25,7 @@ The fork is ours. Upstream bugs are fixed in core files even when the fix change
 
 ## AIDL method order
 
-Binder transaction IDs follow declaration order in `IMdmApi.aidl`, so order is part of the contract with the kiosk app. Our methods keep their position, last of our additions (`publishHealth` is currently last). On an upstream merge, upstream's new methods go after ours, and the kiosk app's copy of the AIDL is updated to the same order. The `app` and `lib` copies must stay identical. After an upstream merge that adds methods, a plugin built against upstream's lib may hit `publishHealth`'s transaction ID; the caller check makes that a harmless `false`. Whoever merges must re-append `publishHealth` after upstream's methods and bump nothing else.
+Binder transaction IDs follow declaration order in `IMdmApi.aidl`, so order is part of the contract with the kiosk app. Our methods keep their position, last of our additions (`publishHealth` is currently last). On an upstream merge, upstream's new methods go after ours, and the kiosk app's copy of the AIDL is updated to the same order. The `app` and `lib` copies must stay identical. On an upstream merge, keep `publishHealth` at its current position, append upstream's new methods after it, and update the kiosk app's AIDL copy to match; never move or remove an existing method. A plugin built against upstream's lib that hits `publishHealth`'s transaction ID gets a harmless `false` from the caller check.
 
 ## How a configuration update flow ends
 
