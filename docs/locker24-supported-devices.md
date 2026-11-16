@@ -4,7 +4,7 @@ A tablet model is supported once it has passed the device checklist in `locker24
 
 ## Samsung Galaxy Tab A9 (SM-X110), Android 15
 
-- Status: **pilot, checklist in progress**
+- Status: **pilot checklist passed** (power cut and Wi-Fi outage deferred to field testing)
 - Tested: 2026-11-16, device M-01, configuration "Kiosk - HPMO QA" on mdm.locker24.app
 - Agent: 6.40-l24.1 at enrolment, then 6.40-l24.2 and 6.40-l24.3 by self-update
 - Kiosk app: PostBox Client QA (`com.hpmoqa.tablet_client`) 1.2.0 at enrolment, updated silently up to 1.2.6
@@ -20,8 +20,8 @@ A tablet model is supported once it has passed the device checklist in `locker24
 | 6 | Reboot | PASS | Back in landscape kiosk about 6 s after the agent starts. Samsung delivers BOOT_COMPLETED about 10 s after the launcher is already up. |
 | 7 | Power cut | DEFERRED | To be tested in the field. |
 | 8 | Wi-Fi off for 15 min | DEFERRED | To be tested in the field. |
-| 9 | Scheduled reboot fires once | PENDING | `reboot_time` never fires within the first hour of uptime (by design, to prevent loops). The first attempt at 11:34 was correctly skipped (uptime 5 min). Retest at 12:37 CET. |
-| 10 | Time zone Europe/Sarajevo | PENDING | Verified together with item 9. |
+| 9 | Scheduled reboot fires once | PASS | `reboot_time` 12:35 fired at 12:35:05 CET; back in landscape kiosk at 12:35:47; no second reboot. It never fires within the first hour of uptime (by design, to prevent loops): an attempt at 11:34 with 5 min uptime was correctly skipped. |
+| 10 | Time zone Europe/Sarajevo | PASS | The scheduled reboot fired at the configured local minute, with no hour shift. |
 
 ### Bugs found and fixed during the pilot
 
