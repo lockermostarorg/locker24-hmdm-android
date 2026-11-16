@@ -7,7 +7,7 @@ The fork is ours. Upstream bugs are fixed in core files even when the fix change
 | File | Change | Why | Flavors |
 |---|---|---|---|
 | `.gitignore` | Ignores `/locker24.properties` and `*.jks`. | The signing config and keystore stay out of git. | both |
-| `app/build.gradle` | `locker24` product flavor: package `app.locker24.mdm`, server URLs, MQTT port, version, release signing from `locker24.properties` (the build fails without it). | Own package, server and signing. | locker24 |
+| `app/build.gradle` | `locker24` product flavor: package `app.locker24.mdm`, server URLs, MQTT port, version (currently `6.40-l24.5`, versionCode `1540005`), release signing from `locker24.properties` (the build fails without it). | Own package, server and signing. | locker24 |
 | `locker24.properties.example` | Template for the signing properties. | Documents the required keys without secrets. | locker24 |
 | `pro/ProUtils.java` | Upstream ships this file as stubs. Ours implements the lock-task kiosk (`startCosuKioskMode`, kiosk options, unlock) for both flavors. Only `applyConfiguredOrientation`, the kiosk app update tracking (forced fresh start, 3 s retry, settled check, joining a fresh start still coming up) and the `Locker24Hooks` calls check the flavor. A forced or retried start that throws restores the previous fresh-start time. Decisions live in `locker24/KioskPolicy`, `KioskStartPolicy`, `OrientationPolicy`. | ProUtils is the upstream extension point for the kiosk. | **both flavors** (orientation and update tracking: locker24 only) |
 | `util/Utils.java` | `orientationDiag()` and an orientation log line in `setOrientation`. | Remote diagnosis of orientation problems. | both (logging only) |

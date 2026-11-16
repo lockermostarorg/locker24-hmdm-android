@@ -9,6 +9,8 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.net.ConnectivityManager;
+import android.net.Network;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
@@ -37,6 +39,7 @@ public class KioskWatchdogService extends Service {
     private static final String SETTING_SECONDS = "kiosk_watchdog_seconds";
     private static final int LAUNCHER_IN_FRONT_LIMIT = 4;
     private static final long REPLACE_RECHECK_MS = 6000;
+    private static final long HEALTH_BOOT_DELAY_MS = 60_000L;
 
     private HandlerThread thread;
     private Handler handler;
@@ -49,6 +52,16 @@ public class KioskWatchdogService extends Service {
     private String lastCappedValue;
     private boolean lockNeverEngagedLogged;
     private PowerManager.WakeLock wakeLock;
+    private Boolean lastLockTaskLocked;
+    private boolean powerReceiverRegistered;
+    private ConnectivityManager.NetworkCallback networkCallback;
+
+    private final BroadcastReceiver powerReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            requestHealthReport("charging", HealthSchedule.TRIGGER_DEBOUNCE_MS);
+        }
+    };
 
     private final Runnable tickRunnable = new Runnable() {
         @Override
@@ -170,6 +183,7 @@ public class KioskWatchdogService extends Service {
         thread.start();
         handler = new Handler(thread.getLooper());
         registerPackageReceiver();
+        registerHealthTriggers();
         try {
             PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
             if (pm != null) {
@@ -221,6 +235,7 @@ public class KioskWatchdogService extends Service {
         } catch (Throwable ignored) {
         }
         wakeLock = null;
+        unregisterHealthTriggers();
         if (receiverRegistered) {
             try {
                 unregisterReceiver(packageReceiver);
@@ -253,6 +268,12 @@ public class KioskWatchdogService extends Service {
                 checkScheduledReboot();
             } catch (Throwable e) {
                 safeLog(Const.LOG_WARN, "Scheduled reboot check failed: " + e);
+            } finally {
+                try {
+                    HealthReporter.onTick(getApplicationContext(), intervalMs);
+                } catch (Throwable e) {
+                    safeLog(Const.LOG_WARN, "Health tick failed: " + e);
+                }
             }
         }
     }
@@ -290,6 +311,10 @@ public class KioskWatchdogService extends Service {
         boolean required = ProUtils.kioskModeRequired(ctx);
         boolean adminUnlocked = KioskState.isAdminUnlocked(ctx);
         boolean lockTaskLocked = ProUtils.isKioskModeRunning(ctx);
+        if (lastLockTaskLocked != null && lastLockTaskLocked != lockTaskLocked) {
+            requestHealthReport("kiosk", HealthSchedule.KIOSK_DEBOUNCE_MS);
+        }
+        lastLockTaskLocked = lockTaskLocked;
         boolean launcherInFront = isLauncherInFront();
         PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
         boolean interactive = pm == null || pm.isInteractive();
@@ -323,13 +348,20 @@ public class KioskWatchdogService extends Service {
         }
         safeLog(Const.LOG_WARN, "Kiosk watchdog relaunching launcher (lockTask=" + lockTaskLocked
                 + ", inFront=" + launcherInFront + ")");
-        relaunch();
+        if (relaunch()) {
+            try {
+                HealthCounters.recordWatchdogRestart(ctx);
+            } catch (Throwable e) {
+                safeLog(Const.LOG_WARN, "Cannot record watchdog restart: " + e);
+            }
+        }
     }
 
-    private void relaunch() {
+    /** Returns false when a relaunch less than 5 s ago makes this one a no-op. */
+    private boolean relaunch() {
         long now = android.os.SystemClock.elapsedRealtime();
         if (lastRelaunchAt != 0 && now - lastRelaunchAt < 5000) {
-            return;
+            return false;
         }
         lastRelaunchAt = now;
         try {
@@ -339,6 +371,7 @@ public class KioskWatchdogService extends Service {
         } catch (Throwable e) {
             safeLog(Const.LOG_WARN, "Kiosk watchdog cannot start launcher: " + e);
         }
+        return true;
     }
 
     /**
@@ -393,6 +426,74 @@ public class KioskWatchdogService extends Service {
             receiverRegistered = true;
         } catch (Throwable e) {
             safeLog(Const.LOG_WARN, "Cannot register package receiver: " + e);
+        }
+    }
+
+    private void registerHealthTriggers() {
+        if (!HealthReporter.isEnabled()) {
+            return;
+        }
+        requestHealthReport("boot", HEALTH_BOOT_DELAY_MS);
+        try {
+            IntentFilter filter = new IntentFilter();
+            filter.addAction(Intent.ACTION_POWER_CONNECTED);
+            filter.addAction(Intent.ACTION_POWER_DISCONNECTED);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(powerReceiver, filter, null, handler, Context.RECEIVER_EXPORTED);
+            } else {
+                registerReceiver(powerReceiver, filter, null, handler);
+            }
+            powerReceiverRegistered = true;
+        } catch (Throwable e) {
+            safeLog(Const.LOG_WARN, "Cannot register power receiver: " + e);
+        }
+        try {
+            ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm != null) {
+                ConnectivityManager.NetworkCallback callback = new ConnectivityManager.NetworkCallback() {
+                    @Override
+                    public void onAvailable(Network network) {
+                        requestHealthReport("network", HealthSchedule.TRIGGER_DEBOUNCE_MS);
+                    }
+
+                    @Override
+                    public void onLost(Network network) {
+                        requestHealthReport("network", HealthSchedule.TRIGGER_DEBOUNCE_MS);
+                    }
+                };
+                cm.registerDefaultNetworkCallback(callback, handler);
+                networkCallback = callback;
+            }
+        } catch (Throwable e) {
+            safeLog(Const.LOG_WARN, "Cannot register network callback: " + e);
+        }
+    }
+
+    private void unregisterHealthTriggers() {
+        if (powerReceiverRegistered) {
+            try {
+                unregisterReceiver(powerReceiver);
+            } catch (Throwable ignored) {
+            }
+            powerReceiverRegistered = false;
+        }
+        if (networkCallback != null) {
+            try {
+                ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+                if (cm != null) {
+                    cm.unregisterNetworkCallback(networkCallback);
+                }
+            } catch (Throwable ignored) {
+            }
+            networkCallback = null;
+        }
+    }
+
+    private void requestHealthReport(String trigger, long delayMs) {
+        try {
+            HealthReporter.requestSoon(getApplicationContext(), trigger, delayMs);
+        } catch (Throwable e) {
+            safeLog(Const.LOG_WARN, "Health request failed: " + e);
         }
     }
 

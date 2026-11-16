@@ -14,6 +14,15 @@ public class Locker24Hooks {
             if (!BuildConfig.FLAVOR.equals("locker24")) {
                 return;
             }
+            try {
+                HealthCounters.setLastConfigSyncAt(context, System.currentTimeMillis());
+                HealthSafetyNetWorker.schedule(context);
+            } catch (Throwable e) {
+                try {
+                    RemoteLogger.log(context, Const.LOG_WARN, "Locker24 health scheduling failed: " + e);
+                } catch (Throwable ignored) {
+                }
+            }
             KioskWatchdogService.start(context, KioskWatchdogService.ACTION_RECHECK);
             try {
                 DevicePolicies.apply(context);

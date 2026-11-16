@@ -332,6 +332,10 @@ public class PushNotificationMqttWrapper {
         }
     }
 
+    public boolean isConnected() {
+        return client != null && client.isConnected();
+    }
+
     public boolean checkPingDeath(Context context) {
         // If not connected, ping is not working so we return false
         return client != null && client.isConnected() && PingDeathDetector.getInstance().detectPingDeath(context);
