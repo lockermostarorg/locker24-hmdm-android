@@ -30,12 +30,12 @@ A tablet model is supported once it has passed the device checklist in `locker24
 2. **The kiosk app came back in portrait after an update.** The app set landscape only at runtime (`SystemChrome.setPreferredOrientations` in Dart `main()`), so a freshly started activity began in the launcher's or the device's orientation. The launcher also locked itself to a stale portrait (`MainActivity.lockOrientation()`).
    - Fixed in two places:
      - **Agent 6.40-l24.3:** the launcher requests the configured orientation from `onCreate` on and never locks to the "current" one.
-     - **Kiosk app:** declares `android:screenOrientation="sensorLandscape"` on its MainActivity. This is committed on `hpmostar-qa-mdm` and still has to be ported to the other tenant branches.
+     - **Kiosk app:** declares `android:screenOrientation="sensorLandscape"` on its MainActivity. This is now in all five tablet branches (main, demo, post, hpmostar, hpmostar-qa).
 
 ### Known follow-ups
 
 - The kiosk app cold-starts twice after an update: the watchdog's immediate relaunch, when lock task is already gone, does not respect the 5 s fresh-start guard. This is harmless but worth tuning.
 - The device-log uploader sends each entry 2 to 3 times (same `createtime`).
-- Bottom navigation bar: hidden since PostBox QA 1.2.7 / PostBox 1.3.1 (insets controller, immersive). A swipe shows Back briefly. Main, post and demo still have the old code.
+- Bottom navigation bar: hidden since PostBox QA 1.2.7 / PostBox 1.3.1 (insets controller, immersive). A swipe shows Back briefly. All five tablet branches (main, demo, post, hpmostar, hpmostar-qa) now have the managed kiosk, manifest landscape, bar hiding and health publishing.
 - Two config-update flows sometimes run for one push since the agent self-updates: the second re-downloads the APK and then fails to install it with ENOENT. This is harmless but should be fixed.
 - The kiosk app targets SDK 36. On Android 16, large screens may ignore app orientation requests, so re-run this checklist when the tablet gets Android 16.
