@@ -1,4 +1,6 @@
-# Locker24 MDM: hpmo-qa pilot configuration
+# Locker24 MDM: Kiosk - HPMO QA pilot configuration
+
+The pilot configuration's live name in the panel is **Kiosk - HPMO QA**; every query below uses that exact name. (`hpmo-qa` is only the name of the device group.)
 
 Record of every value to set in the panel at https://mdm.locker24.app, so the configuration can be rebuilt.
 
@@ -25,7 +27,7 @@ Upload both in the panel under Applications. When a new version is uploaded the 
 
 Agent `6.40-l24.5` and later send health reports. Do not push them to the fleet until the server's health endpoint answers: `POST /rest/public/plugin-locker24-health/report/{number}` must return JSON with `status` `OK` (or `ERROR` with a message), not 404. Until then every tablet retries its upload, queues up to 288 reports and keeps probing the server.
 
-## 2. Configuration `hpmo-qa`
+## 2. Configuration `Kiosk - HPMO QA`
 
 - MDM application: `app.locker24.mdm`
 - Admin receiver: `com.hmdm.launcher.AdminReceiver`
@@ -47,11 +49,11 @@ The v7 panel stores `kioskScreenOn` and sends it to devices, but its kiosk secti
 
 ```bash
 cd /tmp
-sudo -u postgres psql hmdm -c "UPDATE configurations SET kioskscreenon = true WHERE name = 'hpmo-qa';"
-sudo -u postgres psql hmdm -c "SELECT name, kioskscreenon FROM configurations WHERE name = 'hpmo-qa';"
+sudo -u postgres psql hmdm -c "UPDATE configurations SET kioskscreenon = true WHERE name = 'Kiosk - HPMO QA';"
+sudo -u postgres psql hmdm -c "SELECT name, kioskscreenon FROM configurations WHERE name = 'Kiosk - HPMO QA';"
 ```
 
-Expected: `UPDATE 1`, then `hpmo-qa | t`. Then open the configuration in the panel and click Save once, so the change is pushed to the devices. The form loads the stored value and saves it back, so later saves keep it on. Run the `SELECT` again after any later save to be sure.
+Expected: `UPDATE 1`, then `Kiosk - HPMO QA | t`. Then open the configuration in the panel and click Save once, so the change is pushed to the devices. The form loads the stored value and saves it back, so later saves keep it on. Run the `SELECT` again after any later save to be sure.
 
 ### Kiosk app entry (`com.hpmoqa.tablet_client`)
 
@@ -71,7 +73,7 @@ Battery-optimisation status shows in the device log as `battery_opt agent=... ki
 ## 4. Device group and QR code
 
 - Device group: `hpmo-qa`
-- The QR code is generated from configuration `hpmo-qa`, with the custom extra `com.hmdm.GROUP=hpmo-qa`.
+- The QR code is generated from configuration `Kiosk - HPMO QA`, with the custom extra `com.hmdm.GROUP=hpmo-qa` (the device group).
 
 ## 5. Verify (read-only)
 
@@ -125,28 +127,30 @@ These mirror the canonical H1-H6 in the server repo's `docs/locker24-health.md`;
 
 R1 to R5 prove the release flow on the pilot tablet M-01. The server operator guide is `docs/locker24-release-flow.md` in the server repo.
 
-**Warning.** An upload or release on schedule or Immediately moves EVERY configuration that follows that package, in every customer, including production `hpmo`. Never upload a throwaway build of a package that a production configuration uses unless it is held and pinned. These checks therefore use Hold plus pins for the kiosk app, and a harmless test app linked to `hpmo-qa` only.
+**File names.** Since the server no longer overwrites a file that a version uses, a same-named APK is stored under `<name>-<versionCode>.apk` (or with a short hash added); it is still best to give every build a file name that contains its version (for example `hpmoqa-1.2.9+24-test.apk`) so the files stay recognizable. Never rely on replacing an earlier file.
+
+**Warning.** An upload or release on schedule or Immediately moves EVERY configuration that follows that package, in every customer, including production `hpmo`. Never upload a throwaway build of a package that a production configuration uses unless it is held and pinned. These checks therefore use Hold plus pins for the kiosk app, and a harmless test app linked to `Kiosk - HPMO QA` only.
 
 Needed:
-- M-01 enrolled on agent `6.40-l24.6` in configuration `hpmo-qa`, and nothing else assigned to that configuration. The pilot normally runs with "Schedule app update" OFF (section 2): switch it on for these checks and set the "App update time" window (From / To) as each check says. Without a window an on-schedule release installs at once.
-- Kiosk APKs of `com.hpmoqa.tablet_client` with rising version numbers, all ABOVE today's real build `1.2.8+23` (`locker24-tablet/dist/hpmoqa-1.2.8+23-health-release.apk`) and BELOW the real release you upload at the end: `1.2.9+24`, `1.2.10+25`, `1.2.11+26`, `1.2.12+27`, `1.2.13+28`, signed like the real build. They are test uploads of a package used only by `hpmo-qa` and `hpmo-qa`-like configurations: check in the panel (application, Configurations) that no production configuration uses it before you start. The LAST released version must be a real build when you finish (see the cleanup).
-- A harmless self-built test app: package `app.locker24.releasetest`, versions `1.0` and `2.0`, signed with any key (a minimal empty-activity project, or any small APK project with the applicationId changed). Link it to `hpmo-qa` only (Applications, the app, Configurations dialog) with the install action.
-- A throwaway configuration with no tablets assigned, created for R4 (copy `hpmo-qa` and rename it `r4-throwaway`).
+- M-01 enrolled on agent `6.40-l24.6` in configuration `Kiosk - HPMO QA`, and nothing else assigned to that configuration. The pilot normally runs with "Schedule app update" OFF (section 2): switch it on for these checks and set the "App update time" window (From / To) as each check says. Without a window an on-schedule release installs at once.
+- Kiosk APKs of `com.hpmoqa.tablet_client` with rising version numbers, all ABOVE today's real build `1.2.8+23` (`locker24-tablet/dist/hpmoqa-1.2.8+23-health-release.apk`) and BELOW the real release you upload at the end: `1.2.9+24`, `1.2.10+25`, `1.2.11+26`, `1.2.12+27`, `1.2.13+28`, signed like the real build. They are test uploads of a package used only by `Kiosk - HPMO QA` and configurations like it: check in the panel (application, Configurations) that no production configuration uses it before you start. The LAST released version must be a real build when you finish (see the cleanup).
+- A harmless self-built test app: package `app.locker24.releasetest`, versions `1.0` and `2.0`, signed with any key (a minimal empty-activity project, or any small APK project with the applicationId changed). Link it to `Kiosk - HPMO QA` only (Applications, the app, Configurations dialog) with the install action.
+- A throwaway configuration with no tablets assigned, created for R4 (copy `Kiosk - HPMO QA` and rename it `r4-throwaway`).
 
 Read results on Functions -> Fleet health (app versions), the panel's version list and upload summary, and on the server `grep 'Release app=' /var/lib/tomcat10/logs/catalina.out | tail`.
 
 - **R1. Schedule, window OPEN (now inside it).** Set the window From 1 hour ago, To 2 hours ahead. Upload kiosk `1.2.9+24` with "On each configuration's schedule". The summary says "Released to N configurations"; the versions list shows Released with your name. Pass: M-01 installs and is back in kiosk within 60 s, Fleet health shows the new kiosk version, the log line has `mode=schedule`. Also pass with no window at all: it installs at once.
 - **R2. Schedule, window CLOSED (starts 2 hours from now).** Set From 2 hours ahead, To 4 hours ahead. Upload kiosk `1.2.10+25` on schedule. Pass: the summary shows the release, but after 10 minutes M-01 still reports `1.2.9+24`; no install, no kiosk exit. Then move the window so that now is inside it and save the configuration: M-01 installs `1.2.10+25` within about 60 s and returns to kiosk.
 - **R3. Immediately, window CLOSED: only the named app installs.** Keep the window closed (From 2 hours ahead). Upload test app `2.0` on schedule (it waits for the window), then upload kiosk `1.2.11+26` with "Immediately". Pass: M-01 installs the kiosk app within a minute (back in kiosk, Fleet health shows `1.2.11+26`) while the test app is still on `1.0` (check Settings > Apps on the tablet, or `adb shell dumpsys package app.locker24.releasetest | grep versionName`). Then open the window (move it over now and save): the test app updates to `2.0`. That "the agent installs its own update last" is not checked on a device: it is covered by the unit test `AppInstallOrderTest`. An older agent (`6.40-l24.5` or earlier, needs a second tablet, optional) gets only the ordinary update and installs the kiosk in its window, never at once. No agent build is uploaded in these checks.
-- **R4. Hold, pin the pilot, release.** Window OPEN (From 1 hour ago, To 2 hours ahead) in `hpmo-qa`. `r4-throwaway` (no tablets) also uses the kiosk app, following latest. Upload kiosk `1.2.12+27` with Hold: the summary says "Held; not applied" and M-01 does not change. In `hpmo-qa`, Applications, pick `1.2.12+27` for the kiosk row (it shows "Pinned to 1.2.12+27") and save: M-01 installs it within a minute while `r4-throwaway` stays on `1.2.11+26`. Release the held version Immediately; remember that this moves EVERY following configuration of that package (so only configurations you created for the test or know about may use it). Pass: `r4-throwaway` moves to `1.2.12+27`, in `hpmo-qa` the row reads "Follows latest" again (the pilot rejoined), the versions list shows `1.2.12+27` Released with your name, and the log line reads `mode=immediate`.
-- **R5. A pinned configuration is untouched by an upload.** Window OPEN. Pin the kiosk row of `hpmo-qa` to `1.2.12+27` (toggle "Follows latest" off, save). Upload kiosk `1.2.13+28` Immediately. Pass: the summary and the log line count only the following configurations (not `hpmo-qa`), M-01 stays on `1.2.12+27`, and the row still reads "Pinned to 1.2.12+27". Switch the toggle back on and save: the row moves to `1.2.13+28` and M-01 installs. Finally upload `1.2.13+28` again unchanged: nothing happens and the summary reports the stored state ("Released to 0 configurations").
+- **R4. Hold, pin the pilot, release.** Window OPEN (From 1 hour ago, To 2 hours ahead) in `Kiosk - HPMO QA`. `r4-throwaway` (no tablets) also uses the kiosk app, following latest. Upload kiosk `1.2.12+27` with Hold: the summary says "Held; not applied" and M-01 does not change. In `Kiosk - HPMO QA`, Applications, pick `1.2.12+27` for the kiosk row (it shows "Pinned to 1.2.12+27") and save: M-01 installs it within a minute while `r4-throwaway` stays on `1.2.11+26`. Release the held version Immediately; remember that this moves EVERY following configuration of that package (so only configurations you created for the test or know about may use it). Pass: `r4-throwaway` moves to `1.2.12+27`, in `Kiosk - HPMO QA` the row reads "Follows latest" again (the pilot rejoined), the versions list shows `1.2.12+27` Released with your name, and the log line reads `mode=immediate`.
+- **R5. A pinned configuration is untouched by an upload.** Window OPEN. Pin the kiosk row of `Kiosk - HPMO QA` to `1.2.12+27` (toggle "Follows latest" off, save). Upload kiosk `1.2.13+28` Immediately. Pass: the summary and the log line count only the following configurations (not `Kiosk - HPMO QA`), M-01 stays on `1.2.12+27`, and the row still reads "Pinned to 1.2.12+27". Switch the toggle back on and save: the row moves to `1.2.13+28` and M-01 installs. Finally upload `1.2.13+28` again unchanged: nothing happens and the summary reports the stored state ("Released to 0 configurations").
 
 #### Cleanup after R1 to R5
 
-1. Restore "Schedule app update" and the "App update time" values of `hpmo-qa` to what section 2 says (scheduled update OFF for the pilot), and save.
+1. Restore "Schedule app update" and the "App update time" values of `Kiosk - HPMO QA` to what section 2 says (scheduled update OFF for the pilot), and save.
 2. Make the last released kiosk version a real build: build and upload a real PostBox QA release whose version name and code are HIGHER than every test build used above (the next real one after `1.2.8+23` is at least `1.2.14+29`, since the test builds took `1.2.9+24` to `1.2.13+28`), on schedule with the window open (or Immediately), and check that every following configuration and M-01 are on it. Test versions cannot be downgraded on the tablet. Do not use the `1.2.0+15` build from section 1.
-3. In `hpmo-qa` set the kiosk row back to "Follows latest" (R5 leaves it that way if you finished it).
-4. Set the test app's action in `hpmo-qa` to "remove" (uninstall) and wait until M-01 has uninstalled it. Then unlink and delete the test app (application, Configurations dialog to unlink, then delete the app) and delete the configuration `r4-throwaway`. Delete the test kiosk versions that no configuration uses, if wanted.
+3. In `Kiosk - HPMO QA` set the kiosk row back to "Follows latest" (R5 leaves it that way if you finished it).
+4. Set the test app's action in `Kiosk - HPMO QA` to "remove" (uninstall) and wait until M-01 has uninstalled it. Then unlink and delete the test app (application, Configurations dialog to unlink, then delete the app) and delete the configuration `r4-throwaway`. Delete the test kiosk versions that no configuration uses, if wanted.
 5. Confirm M-01 is back in landscape kiosk on the real build and shows green on Fleet health.
 
 Any failure goes back to the owning task as a bug, with the logcat lines.
