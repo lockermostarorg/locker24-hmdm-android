@@ -10,7 +10,7 @@ Before any tablet is enrolled, the server must have its own MQTT admin password 
 
 | APK | Package | Notes |
 |---|---|---|
-| Agent `app-locker24-release.apk` | `app.locker24.mdm` | version `6.40-l24.1`, built from branch `feat/locker24-kiosk` with the REAL signing key and the real `requestSignature` |
+| Agent `app-locker24-release.apk` | `app.locker24.mdm` | version `6.40-l24.6` (versionCode `1540006`, flavor `locker24`), built from `master` with the REAL signing key and the real `requestSignature`. It adds the `forceAppUpdate` push (install the named apps at once) on top of the health reports of `6.40-l24.5`. Upload it only after the server release that knows release modes is deployed (server repo `deploy/README.md`, "Rollout order") |
 | Kiosk app `hpmoqa-1.2.0+15-mdm-release.apk` | `com.hpmoqa.tablet_client` | version 1.2.0+15 from branch `hpmostar-qa-mdm`; points at https://api.hpmostar-qa.locker24.app |
 
 Before uploading the agent, check the signing certificate:
@@ -21,7 +21,7 @@ apksigner verify --print-certs app-locker24-release.apk
 
 The SHA-256 must be the real release key. The TEST key must never be uploaded.
 
-Upload both in the panel under Applications.
+Upload both in the panel under Applications. When a new version is uploaded the panel asks how to apply it (on schedule, immediately or hold); use on schedule for the agent. Uploading a version name that exists with a different file is refused, so every rebuild needs a new version name; this also keeps the QR code checksum (cached per version) valid.
 
 Agent `6.40-l24.5` and later send health reports. Do not push them to the fleet until the server's health endpoint answers: `POST /rest/public/plugin-locker24-health/report/{number}` must return JSON with `status` `OK` (or `ERROR` with a message), not 404. Until then every tablet retries its upload, queues up to 288 reports and keeps probing the server.
 
@@ -120,5 +120,17 @@ These mirror the canonical H1-H6 in the server repo's `docs/locker24-health.md`;
 - **H4. Alert raised and cleared.** The offline alert of H2 clears about 5 minutes after the first real report. Unplug the charger: yellow `not_charging` within about 2 minutes and an alert after 30 minutes non-green; replug: green, and the alert clears about 5 minutes later.
 - **H5. Admin exit of the kiosk.** Push `exitKiosk`: yellow "Kiosk off (admin)" within about 3 minutes (30 s tick, 60 s debounce, 1 min evaluation) and NO alert. Start the kiosk again: green. An accidental loss of lock task (not admin) still turns red `kiosk_not_running` (after 2 consecutive fresh reports) and alerts.
 - **H6. Update gap does not go red.** Publish a kiosk app update (or reinstall the same version) while watching: the 5-10 second gap while the app is replaced must NOT turn the tablet red or raise an alert, and a scheduled update window must not leave it yellow or alerting before the window has had its chance.
+
+### Release flow checks (agent 6.40-l24.6)
+
+R1 to R5 prove the release flow on the pilot tablet M-01. The server operator guide is `docs/locker24-release-flow.md` in the server repo. Needed: M-01 enrolled on agent `6.40-l24.6` in configuration `hpmo-qa`, with "Schedule app update" switched on and an "App update time" window (From / To) in the configuration. The pilot normally runs with it OFF (immediate, see section 2): switch it on for R1 to R5 and put it back afterwards. Without a window an on-schedule release installs at once. Three kiosk APKs with rising version numbers (for example `1.2.1+16`, `1.2.2+17`, `1.2.3+18` of `hpmoqa-*-mdm-release.apk`), and one throwaway agent build with a higher versionCode than `1540006` (for example name `6.40-l24.6-r3`, code `1540007`), signed with the real key. The throwaway agent version stays the latest once uploaded, so later real agent builds must have a higher versionCode. Read results on Functions -> Fleet health (app versions), the panel's version list and upload summary, and on the server `grep 'Release app=' /var/lib/tomcat10/logs/catalina.out | tail`.
+
+- **R1. Schedule, inside the window.** Set the window so that now is inside it (for example From 1 hour ago, To 2 hours ahead). Upload kiosk `1.2.1+16` with "On each configuration's schedule". The summary says "Released to N configurations"; the versions list shows Released with your name. Pass: M-01 installs and is back in kiosk within 60 s, Fleet health shows the new kiosk version, the log line has `mode=schedule` and the configuration. Also pass if the configuration has no window at all: it installs at once.
+- **R2. Schedule, outside the window.** Move the window to start 2 hours from now (To after that). Upload kiosk `1.2.2+17` on schedule. Pass: the summary shows the release, but after 10 minutes M-01 still reports `1.2.1+16`; no install, no kiosk exit. Then move the window so that now is inside it and save the configuration: M-01 installs `1.2.2+17` within about 60 s and returns to kiosk.
+- **R3. Immediately, outside the window.** Window start 2 hours ahead again. Upload the throwaway agent build on schedule, then kiosk `1.2.3+18` with "Immediately". Pass: M-01 installs only the kiosk app at once (within 60 s, back in kiosk, Fleet health shows `1.2.3+18`) while Fleet health still shows agent `6.40-l24.6`. The agent update waits until the window opens. After the window opens (move it over now and save) the agent installs `6.40-l24.6-r3`, last. Optional, needs a second tablet: a tablet on `6.40-l24.5` or earlier gets only the ordinary update and installs the kiosk in its window, never at once.
+- **R4. Hold, pin the pilot, release.** Prepare a second configuration that also uses the kiosk app (or use the other real one) and a kiosk build `1.2.4+19`. Upload it with Hold: the summary says "Held; not applied" and M-01 does not change. In configuration `hpmo-qa`, Applications, pick `1.2.4+19` for the kiosk row (it shows "Pinned to 1.2.4+19") and save: M-01 installs it (inside the window, or at once with no window) while the other configuration stays on `1.2.3+18`. Release the held version (Immediately): the other configuration moves to `1.2.4+19`, and in `hpmo-qa` the row reads "Follows latest" again (the pilot rejoined). Pass: the versions list shows `1.2.4+19` Released with your name, and the log line reads `mode=immediate`.
+- **R5. A pinned configuration is untouched by an upload.** Pin the kiosk row of `hpmo-qa` to `1.2.4+19` (toggle "Follows latest" off), then upload kiosk `1.2.5+20` Immediately. Pass: the summary does not count `hpmo-qa` (it moved only the following configurations), M-01 stays on `1.2.4+19`, and the row still reads "Pinned to 1.2.4+19". Switch the toggle back on and save: the row moves to `1.2.5+20` and M-01 installs. Finally upload `1.2.5+20` again unchanged: nothing happens, no push, and the summary reports the stored state.
+
+Failures go back to the owning task with the Tomcat log line and the agent logcat (`ConfigUpdater`, `PushNotificationProcessor`).
 
 Any failure goes back to the owning task as a bug, with the logcat lines.
